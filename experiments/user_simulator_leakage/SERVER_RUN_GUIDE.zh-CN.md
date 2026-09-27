@@ -4,6 +4,27 @@
 实验只重放已经保存的 Coding Agent 快照并调用 User Simulator，不会重新启动
 Coding Agent，也不需要 Docker、E2B、GPU 或任务镜像。
 
+## 最简一键运行
+
+完成第 2–3 节的代码和 Python 准备后，直接执行：
+
+```bash
+chmod +x experiments/user_simulator_leakage/run_server_experiment.sh
+
+./experiments/user_simulator_leakage/run_server_experiment.sh --samples 20
+```
+
+脚本默认使用 `deepseek/deepseek-v4-flash`，会提示您输入 DeepSeek API Key；输入
+过程不回显，Key 只保存在该脚本进程的环境变量中，不会写入文件或日志。随后脚本
+依次完成 `uv sync`、Mock、专项测试、一次真实 API 冒烟、正式实验和结果完整性
+验证。只验证服务器环境、不调用真实模型时执行：
+
+```bash
+./experiments/user_simulator_leakage/run_server_experiment.sh --mock-only
+```
+
+下文保留每一步的手工命令，便于排错、审计或编写学院集群的作业脚本。
+
 ## 1. 实验规模与资源
 
 默认包含 3 个任务和 3 个条件：
@@ -82,29 +103,37 @@ mkdir -p "$HOME/.config/swe-leakage"
 chmod 700 "$HOME/.config/swe-leakage"
 ```
 
-若使用 OpenRouter，新建
-`$HOME/.config/swe-leakage/openrouter.env`，内容为：
+直接在交互式终端运行一键脚本时，可以不创建密钥文件：脚本会隐藏输入
+`DEEPSEEK_API_KEY`。Slurm 作业没有交互式终端，因此必须使用仓库外的密钥文件。
+
+新建 `$HOME/.config/swe-leakage/deepseek.env`，内容为：
 
 ```bash
-export OPENROUTER_API_KEY='替换为真实Key'
+export DEEPSEEK_API_KEY='替换为真实Key'
 ```
 
 设置仅本人可读：
 
 ```bash
-chmod 600 "$HOME/.config/swe-leakage/openrouter.env"
-source "$HOME/.config/swe-leakage/openrouter.env"
+chmod 600 "$HOME/.config/swe-leakage/deepseek.env"
+source "$HOME/.config/swe-leakage/deepseek.env"
 ```
 
 检查变量存在但不要打印 Key：
 
 ```bash
-test -n "${OPENROUTER_API_KEY:-}" && echo "OPENROUTER_API_KEY is set"
+test -n "${DEEPSEEK_API_KEY:-}" && echo "DEEPSEEK_API_KEY is set"
 ```
 
-如果使用服务商直连，改为导出对应变量，例如 `GEMINI_API_KEY`、
-`ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY`。若学院要求代理，可在提交作业前按学院
-规范设置 `HTTPS_PROXY`；同时确认计算节点而不只是登录节点具有外网访问权限。
+截至 2026 年 9 月，DeepSeek 官方已经使用 `deepseek-v4-pro` 和
+`deepseek-v4-flash`，旧的 `deepseek-chat` / `deepseek-reasoner` 已在 2026 年 7 月
+停止服务，因此本脚本不再使用旧模型名。可参阅
+[DeepSeek 官方更新日志](https://api-docs.deepseek.com/updates/)。
+
+如果改用其他服务商，通过 `--model` 指定模型并导出对应变量，例如
+`OPENROUTER_API_KEY`、`GEMINI_API_KEY`、`ANTHROPIC_API_KEY` 或
+`OPENAI_API_KEY`。若学院要求代理，可在提交作业前按学院规范设置
+`HTTPS_PROXY`；同时确认计算节点而不只是登录节点具有外网访问权限。
 
 ## 5. 先运行无 Key 的 Mock
 
@@ -137,7 +166,7 @@ uv run python -m experiments.user_simulator_leakage.run \
   --task openclaw-security-reviewer \
   --conditions blind \
   --samples 1 \
-  --model openrouter/google/gemini-3.1-pro-preview \
+  --model deepseek/deepseek-v4-flash \
   --output server-results/api-smoke
 ```
 
@@ -165,10 +194,10 @@ jq -r '
 为每次实验使用新的输出目录，不要覆盖旧结果：
 
 ```bash
-RUN_TAG="gemini-$(date +%Y%m%d-%H%M%S)"
+RUN_TAG="deepseek-$(date +%Y%m%d-%H%M%S)"
 
 uv run python -m experiments.user_simulator_leakage.run \
-  --model openrouter/google/gemini-3.1-pro-preview \
+  --model deepseek/deepseek-v4-flash \
   --temperature 0.8 \
   --samples 20 \
   --conditions blind,future_a,future_b \
@@ -180,8 +209,8 @@ uv run python -m experiments.user_simulator_leakage.run \
 
 ```text
 server-results/
-├── gemini-r1/
-├── gemini-r2/
+├── deepseek-r1/
+├── deepseek-r2/
 ├── another-model-r1/
 └── mock-smoke/
 ```
@@ -215,13 +244,13 @@ set -euo pipefail
 module load python/3.12
 cd /absolute/path/to/SWE-Interact-remake
 
-source "$HOME/.config/swe-leakage/openrouter.env"
+source "$HOME/.config/swe-leakage/deepseek.env"
 export PYTHONUNBUFFERED=1
 
-RUN_TAG="gemini-${SLURM_JOB_ID}"
+RUN_TAG="deepseek-${SLURM_JOB_ID}"
 
 uv run python -m experiments.user_simulator_leakage.run \
-  --model openrouter/google/gemini-3.1-pro-preview \
+  --model deepseek/deepseek-v4-flash \
   --temperature 0.8 \
   --samples 20 \
   --conditions blind,future_a,future_b \

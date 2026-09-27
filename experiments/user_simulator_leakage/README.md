@@ -7,6 +7,9 @@ runner or any original task.
 
 For a Chinese Linux/Slurm deployment walkthrough, see
 [`SERVER_RUN_GUIDE.zh-CN.md`](SERVER_RUN_GUIDE.zh-CN.md).
+The accompanying [`run_server_experiment.sh`](run_server_experiment.sh) performs
+dependency setup, Mock/tests, a real API smoke call, the formal run, and result
+validation in one command.
 
 For every sample, the public request, conversation prefix, coding-agent state,
 last response, diff, turn number, and timing are frozen. A **fresh** `UserAgent`

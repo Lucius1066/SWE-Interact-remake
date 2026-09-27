@@ -14,6 +14,8 @@ trials_*/
 hf_dataset/
 pipeline_logs/
 results/
+server-results/
+logs/
 slurm_logs/
 
 # enroot: local .sqsh image store (default SWT_IMAGE_STORE) and stray imports
