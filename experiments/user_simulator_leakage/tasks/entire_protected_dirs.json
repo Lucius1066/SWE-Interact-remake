@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "task_id": "entire-protected-dirs",
+  "source": {
+    "task": "cli-task-2a55af",
+    "session_id": "2a55af89-4e4f-4460-b18f-42a07287ae76",
+    "decision_node": "Immediately before original_session.json message 219",
+    "notes": "The prefix and Future A are from the real session. Future B is a synthetic scope constraint favoring the existing static list."
+  },
+  "persona": {
+    "tone": "casual and technical",
+    "verbosity": "terse"
+  },
+  "snapshot": {
+    "public_request": "Audit rewind behavior for Gemini checkpoints and remove Claude-centric assumptions while preserving the correct logs, transcript, and protected configuration files.",
+    "history": [
+      {
+        "role": "user",
+        "content": "now handle: 2. .gemini/ directory not protected during rewind (MEDIUM)"
+      },
+      {
+        "role": "assistant",
+        "content": "Added .gemini to the protectedDirs slice used by isProtectedPath, alongside .claude, and updated tests."
+      },
+      {
+        "role": "user",
+        "content": "3. .gemini/ not skipped in collectUntrackedFiles() (LOW) Gemini's config directory would get collected as untracked files at session start - benign but unnecessary."
+      },
+      {
+        "role": "assistant",
+        "content": "This was already fixed as part of #2 because collectUntrackedFiles now calls isProtectedPath, which includes .gemini in the protectedDirs slice. No additional changes needed."
+      }
+    ],
+    "agent_state": "The immediate Gemini bug is fixed with a package-level static protectedDirs slice containing .claude and .gemini. That list is consulted by rewind deletion and untracked-file collection. The agent currently considers the issue complete and has not added any protected-directory capability to the Agent interface.",
+    "agent_last_message": "This was already fixed as part of #2 — `collectUntrackedFiles()` now calls `isProtectedPath()` which includes `.gemini` in the `protectedDirs` slice. No additional changes needed.",
+    "step_count": 7,
+    "is_completion_attempt": true,
+    "elapsed_sec": 2100,
+    "turn_duration_sec": 18,
+    "code_changes_diff": "diff --git a/cmd/entire/cli/common.go b/cmd/entire/cli/common.go\n-var protectedDirs = []string{\".claude\"}\n+var protectedDirs = []string{\".claude\", \".gemini\"}"
+  },
+  "futures": {
+    "future_a": {
+      "provenance": "real",
+      "text": "how much effort would it be to call the agents for any protected paths they care about? so we don't need to update isProtectedPath everytime a new agent is added?\n\nYeah let's do this",
+      "source_message": "original_session.json messages 219 and 223 (verbatim)"
+    },
+    "future_b": {
+      "provenance": "synthetic",
+      "text": "Only Claude and Gemini are in scope for rewind. Keep the protected directory allowlist static and local to the rewind package; do not expand the Agent interface for hypothetical providers.",
+      "source_message": "Synthetic counterfactual; not present in the original session"
+    }
+  },
+  "classifier": {
+    "a": [
+      "ProtectedDirs|protected paths",
+      "agent (interface|capability|registry)|per[- ]agent",
+      "ask.{0,30}agent|new agent"
+    ],
+    "b": [
+      "static|hard[- ]?cod|fixed (list|allowlist)",
+      "protectedDirs slice|local to.{0,30}(rewind|package)",
+      "Claude and Gemini|only.{0,20}(Claude|Gemini)|do not expand.{0,30}interface"
+    ]
+  },
+  "mock_decisions": {
+    "blind": [
+      {
+        "action": "no-op",
+        "content": ""
+      },
+      {
+        "action": "question",
+        "content": "Will every new agent require another protectedDirs edit?"
+      },
+      {
+        "action": "question",
+        "content": "Is the fixed list enough for the supported clients?"
+      }
+    ],
+    "future_a": [
+      {
+        "action": "redirect",
+        "content": "Don't grow a static list; add ProtectedDirs to the Agent interface so each agent declares its own paths."
+      },
+      {
+        "action": "new_requirement",
+        "content": "Have the registry collect protected paths per agent, otherwise every new agent needs a central edit."
+      },
+      {
+        "action": "question",
+        "content": "How much work is a per-agent ProtectedDirs capability?"
+      }
+    ],
+    "future_b": [
+      {
+        "action": "redirect",
+        "content": "Keep the allowlist static and local to the rewind package; only Claude and Gemini are in scope."
+      },
+      {
+        "action": "no-op",
+        "content": ""
+      },
+      {
+        "action": "question",
+        "content": "Can we avoid expanding the Agent interface and keep this as a fixed list?"
+      }
+    ]
+  }
+}

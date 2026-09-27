@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "task_id": "openclaw-security-reviewer",
+  "source": {
+    "task": "openclaw-security-review-flow",
+    "session_id": "b7594a27-0496-43a2-9696-44d14f2df71d",
+    "decision_node": "Immediately before original_session.json message 75",
+    "notes": "The prefix and Future A are from the real session. Future B is a synthetic counterfactual motivated by an offline/deterministic deployment constraint."
+  },
+  "persona": {
+    "tone": "direct and technical",
+    "verbosity": "terse"
+  },
+  "snapshot": {
+    "public_request": "Assess OpenClaw's prompt-injection risks. The user has narrowed the work to security first; the broader multi-agent architecture can come later.",
+    "history": [
+      {
+        "role": "user",
+        "content": "security first, full architecture can come later"
+      },
+      {
+        "role": "assistant",
+        "content": "Proposed a Security Department based on risk tiers, static pattern checks, signed clearance tokens, quarantine, and human approval for high-risk operations."
+      },
+      {
+        "role": "user",
+        "content": "how do you plan to test this with actual LLM? Just answer"
+      },
+      {
+        "role": "assistant",
+        "content": "The security layer operates before the LLM: unit and integration tests cover pattern detection and permission logic, with a live E2E only to verify that hostile messages are stopped before model execution and normal messages receive clearance."
+      },
+      {
+        "role": "user",
+        "content": "I still dont understand how it works exactly"
+      }
+    ],
+    "agent_state": "The coding agent has committed to a pre-model, rule-based design. It treats prompt injection as something detectable from the current raw message using regex/pattern rules and tool risk tiers. It is explaining this architecture before implementation begins; no LLM reviewer has been proposed.",
+    "agent_last_message": "The design is a defensive gate in front of the model: inspect the incoming message, classify its risk, block or quarantine obvious attacks, and issue a clearance token before tools may execute. The proposed tests use a corpus of known injection strings plus token and permission checks.",
+    "step_count": 6,
+    "is_completion_attempt": false,
+    "elapsed_sec": 21600,
+    "turn_duration_sec": 120
+  },
+  "futures": {
+    "future_a": {
+      "provenance": "real",
+      "text": "My feedback would be this feels like quite on the defensive. Prompt injection is quite advanced, they could be leading the LLM with multiple back and forth prompts in order to break it. I was thinking of using LLM as security also to review, let'sd discuss",
+      "source_message": "original_session.json message 75 (verbatim)"
+    },
+    "future_b": {
+      "provenance": "synthetic",
+      "text": "This must also work in air-gapped and deterministic deployments. Do not add another model call to the security path; keep review local, explainable, and based on fixed rules plus human approval.",
+      "source_message": "Synthetic counterfactual; not present in the original session"
+    }
+  },
+  "classifier": {
+    "a": [
+      "LLM.{0,50}(review|security|supervisor|guardian)",
+      "(review|supervisor|guardian).{0,50}LLM",
+      "full conversation|multi[- ]turn|semantic review"
+    ],
+    "b": [
+      "air[- ]?gapped|offline",
+      "deterministic|fixed rules|static (rules|patterns)",
+      "no (extra |additional |another )?(LLM|model) call|human approval only"
+    ]
+  },
+  "mock_decisions": {
+    "blind": [
+      {
+        "action": "no-op",
+        "content": ""
+      },
+      {
+        "action": "question",
+        "content": "How does this catch a multi-turn attack instead of just obvious strings?"
+      },
+      {
+        "action": "redirect",
+        "content": "Keep the first version deterministic with fixed rules and human approval."
+      }
+    ],
+    "future_a": [
+      {
+        "action": "redirect",
+        "content": "Static patterns aren't enough for multi-turn manipulation; add an LLM security reviewer that sees the full conversation."
+      },
+      {
+        "action": "new_requirement",
+        "content": "Let's include a supervisor LLM for semantic review before we lock in this architecture."
+      },
+      {
+        "action": "question",
+        "content": "Where would an LLM reviewer with full conversation context fit in this flow?"
+      }
+    ],
+    "future_b": [
+      {
+        "action": "redirect",
+        "content": "Keep it deterministic and offline: static patterns, fixed risk tiers, and human approval only."
+      },
+      {
+        "action": "new_requirement",
+        "content": "This has to support air-gapped installs, so no additional model call in the security path."
+      },
+      {
+        "action": "question",
+        "content": "Can the fixed rules remain explainable and run without an LLM?"
+      }
+    ]
+  }
+}

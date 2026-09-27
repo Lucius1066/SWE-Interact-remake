@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "task_id": "pi-mono-extension-to-core",
+  "source": {
+    "task": "pi-mono-auto-cbb62cbe",
+    "session_id": "cbb62cbe-609c-4a71-be05-dddeb44cfe5e",
+    "decision_node": "Immediately before original_session.json message 89",
+    "notes": "The prefix and Future A are from the real session. Future B is a synthetic permanent-extension counterfactual."
+  },
+  "persona": {
+    "tone": "blunt and informal",
+    "verbosity": "terse"
+  },
+  "snapshot": {
+    "public_request": "Build an over-the-top easter egg for the coding agent that thanks OpenCode for free Kimi K2.5 access and includes the 'powered by daxnuts' branding.",
+    "history": [
+      {
+        "role": "user",
+        "content": "built it as a custom component in an extension so we can iterate faster. can later transfer back to core"
+      },
+      {
+        "role": "user",
+        "content": "don't put it in examples you idiot, for reload, i need it in .pi/extensions/"
+      },
+      {
+        "role": "user",
+        "content": "ok, i need a command in the extension that inserts the thing in the chat ui, possible?"
+      },
+      {
+        "role": "assistant",
+        "content": "Implemented a reloadable /daxnuts extension using ui.custom, keypress dismissal, RGB image content, branding text, and a two-second scanline animation."
+      },
+      {
+        "role": "user",
+        "content": "can we add some animation that ends after 2 seconds or so?"
+      }
+    ],
+    "agent_state": "The feature currently lives entirely in .pi/extensions/daxnuts.ts and is invoked by a slash command. The agent has just finished the animation. It must now decide whether to polish the extension-specific implementation or preserve boundaries that allow the component and trigger logic to be integrated elsewhere.",
+    "agent_last_message": "Done. Added scanline reveal effect that progressively shows the image, then fades in the text. Runs ~2 seconds. `/reload` and `/daxnuts` to test.",
+    "step_count": 15,
+    "is_completion_attempt": false,
+    "elapsed_sec": 5400,
+    "turn_duration_sec": 35,
+    "code_changes_diff": "diff --git a/.pi/extensions/daxnuts.ts b/.pi/extensions/daxnuts.ts\n+ private startAnimation(): void { /* two-second scanline reveal */ }\n+ pi.registerCommand(\"daxnuts\", { handler: showDaxnuts });"
+  },
+  "futures": {
+    "future_a": {
+      "provenance": "real",
+      "text": "ok, now move to core and wire up the logic",
+      "source_message": "original_session.json message 89 (verbatim)"
+    },
+    "future_b": {
+      "provenance": "synthetic",
+      "text": "keep this as a reloadable opt-in extension. don't touch core or model-selection code; users should enable and invoke it explicitly.",
+      "source_message": "Synthetic counterfactual; not present in the original session"
+    }
+  },
+  "classifier": {
+    "a": [
+      "move.{0,30}core|core.{0,30}(integrat|wire|component)",
+      "interactive-mode|model[- ]selection",
+      "opencode.{0,40}kimi|kimi.{0,40}opencode"
+    ],
+    "b": [
+      "keep.{0,40}extension|extension[- ]only",
+      "\\.pi/extensions|reloadable|opt[- ]in",
+      "do not touch core|don't touch core|explicit(ly)? invoke"
+    ]
+  },
+  "mock_decisions": {
+    "blind": [
+      {
+        "action": "no-op",
+        "content": ""
+      },
+      {
+        "action": "question",
+        "content": "Can we keep the component portable if it eventually moves into core?"
+      },
+      {
+        "action": "new_requirement",
+        "content": "Keep it as a reloadable extension for now."
+      }
+    ],
+    "future_a": [
+      {
+        "action": "redirect",
+        "content": "Good enough for iteration; now move the component into core and wire it to OpenCode plus Kimi model selection."
+      },
+      {
+        "action": "new_requirement",
+        "content": "Separate the reusable component from the extension command so core integration is clean."
+      },
+      {
+        "action": "question",
+        "content": "What needs to change in interactive-mode for the core trigger?"
+      }
+    ],
+    "future_b": [
+      {
+        "action": "redirect",
+        "content": "Keep it in .pi/extensions as a reloadable opt-in; don't touch core."
+      },
+      {
+        "action": "new_requirement",
+        "content": "Make the extension self-contained and explicitly invoked by the slash command."
+      },
+      {
+        "action": "question",
+        "content": "Can this remain extension-only without changing model-selection?"
+      }
+    ]
+  }
+}

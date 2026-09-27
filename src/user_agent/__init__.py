@@ -1,5 +1,4 @@
 from .user_agent import UserAgent, UserDecision, UserPersona
-from .agents.user_enabled_agent import UserEnabledTerminus2
 
 __all__ = [
     "UserAgent",
@@ -13,3 +12,12 @@ __all__ = [
 # that importing this package doesn't pull in harbor (which has a heavier
 # transitive dep graph). Use the explicit module path:
 #   from user_agent.agents.user_enabled_codex import UserEnabledCodex
+
+
+def __getattr__(name):
+    """Keep the Terminus wrapper import-compatible without eagerly loading Harbor."""
+    if name == "UserEnabledTerminus2":
+        from .agents.user_enabled_agent import UserEnabledTerminus2
+
+        return UserEnabledTerminus2
+    raise AttributeError(name)
