@@ -27,7 +27,7 @@ for import_root in (SRC_ROOT, HARBOR_SRC):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
 
-from user_agent.user_agent import ACTIONS, UserAgent, UserDecision, UserPersona
+from user_agent.user_agent import ACTIONS, UserAgent, UserDecision, UserPersona  # noqa: E402
 
 
 CONDITIONS = ("blind", "future_a", "future_b")
@@ -259,10 +259,27 @@ class MockLLM:
         return SimpleNamespace(content=raw, tool_calls=[tool_call])
 
 
+def _real_llm_kwargs(
+    model: str, temperature: float, api_base: str | None
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "model_name": model,
+        "temperature": temperature,
+        "api_base": api_base,
+    }
+    if model.lower().startswith("deepseek/"):
+        # The current DeepSeek API enables thinking by default, but thinking mode
+        # rejects the required/named tool_choice used by SWE-Together's UserAgent.
+        # extra_body is forwarded verbatim by LiteLLM, including on versions that
+        # do not yet list DeepSeek's `thinking` extension as a supported parameter.
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    return kwargs
+
+
 def _make_real_llm(model: str, temperature: float, api_base: str | None):
     from harbor.llms.lite_llm import LiteLLM
 
-    return LiteLLM(model_name=model, temperature=temperature, api_base=api_base)
+    return LiteLLM(**_real_llm_kwargs(model, temperature, api_base))
 
 
 async def run_experiment(
@@ -389,6 +406,13 @@ async def run_experiment(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "backend": "mock" if mock else "litellm",
         "model": "mock" if mock else model,
+        "thinking_mode": (
+            None
+            if mock
+            else "disabled"
+            if (model or "").lower().startswith("deepseek/")
+            else "provider_default"
+        ),
         "temperature": None if mock else temperature,
         "samples_per_condition": samples,
         "conditions": conditions,

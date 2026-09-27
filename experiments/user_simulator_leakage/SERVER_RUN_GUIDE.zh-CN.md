@@ -132,6 +132,12 @@ DeepSeek 官方当前要求 Flash 使用模型名 `deepseek-flash`，Pro 使用
 模型处理，因此本脚本不再使用该旧别名。可参阅
 [DeepSeek API 文档](https://api-docs.deepseek.com/)。
 
+DeepSeek 当前默认开启 Thinking，但 Thinking 模式不接受本项目 User
+Simulator 使用的 `tool_choice="required"`。实验运行器会仅对 `deepseek/*`
+模型显式发送 `thinking: {type: disabled}`；其他模型仍使用服务商默认值。
+最终采用的模式会写入 `summary.json` 的 `thinking_mode` 字段。这个设置只解决
+工具调用兼容性，不改变三种条件下的冻结上下文。
+
 如果改用其他服务商，通过 `--model` 指定模型并导出对应变量，例如
 `OPENROUTER_API_KEY`、`GEMINI_API_KEY`、`ANTHROPIC_API_KEY` 或
 `OPENAI_API_KEY`。若学院要求代理，可在提交作业前按学院规范设置
@@ -190,6 +196,13 @@ jq -r '
 ```
 
 没有输出才表示未记录到 API 错误。
+
+如果看到 LiteLLM 无法通过 SOCKS 下载远程 model cost map、随后
+`Falling back to local backup` 的警告，可以忽略：它只影响可选的远程价格表，
+不会使调用失败。若紧接着出现
+`Thinking mode does not support this tool_choice`，说明使用的是尚未包含上述修复
+的旧代码；执行 `git pull` 后重新运行即可。失败的 smoke 目录应保留作诊断，
+正式实验不会在 smoke 校验失败后继续执行。
 
 ## 7. 正式运行
 

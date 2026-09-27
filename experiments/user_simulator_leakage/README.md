@@ -66,6 +66,12 @@ Use `--task TASK_ID` repeatedly to select tasks and `--conditions
 blind,future_a,future_b` to select conditions. No coding-agent container is
 needed: the coding-agent snapshot is already stored in each experiment task.
 
+For `deepseek/*` models the runner explicitly sends
+`thinking: {type: disabled}`. DeepSeek enables thinking by default, while its
+thinking mode does not accept the `tool_choice="required"` call used by the
+existing SWE-Together User Simulator. The applied mode is recorded in
+`summary.json` as `thinking_mode`. Other providers retain their defaults.
+
 ## Outputs and leakage controls
 
 `decisions.jsonl` keeps the structured action, full raw model response, exact

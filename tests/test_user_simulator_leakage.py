@@ -9,6 +9,7 @@ from experiments.user_simulator_leakage.run import (
     build_experiment_input,
     classify_decision,
     load_tasks,
+    _real_llm_kwargs,
     run_experiment,
 )
 from user_agent.user_agent import UserDecision
@@ -33,6 +34,10 @@ def test_three_tasks_load_and_mark_real_vs_synthetic_futures():
     for task in tasks:
         assert task["futures"]["future_a"]["provenance"] == "real"
         assert task["futures"]["future_b"]["provenance"] == "synthetic"
+
+    deepseek_kwargs = _real_llm_kwargs("deepseek/deepseek-flash", 0.8, None)
+    assert deepseek_kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "extra_body" not in _real_llm_kwargs("openai/gpt-5", 0.8, None)
 
 
 def test_only_future_block_changes_across_conditions():
