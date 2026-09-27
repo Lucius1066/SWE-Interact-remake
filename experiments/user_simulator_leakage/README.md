@@ -5,6 +5,9 @@ current decision when it is given information about a future requirement. It
 reuses `src/user_agent/user_agent.py`; it does not change the normal benchmark
 runner or any original task.
 
+For a Chinese Linux/Slurm deployment walkthrough, see
+[`SERVER_RUN_GUIDE.zh-CN.md`](SERVER_RUN_GUIDE.zh-CN.md).
+
 For every sample, the public request, conversation prefix, coding-agent state,
 last response, diff, turn number, and timing are frozen. A **fresh** `UserAgent`
 is created, so samples share no simulator history. The only model-visible
