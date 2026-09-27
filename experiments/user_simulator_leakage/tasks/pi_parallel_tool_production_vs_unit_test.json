@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "task_id": "parallel-tool-production-vs-unit-test",
+  "source": {
+    "task": "pi-mono-parallel-tool-stall",
+    "session_id": "976d9c32-9767-4617-9b72-fc351c99b2b7",
+    "decision_node": "Immediately before original_session.json message 114",
+    "decision_message_index": 114,
+    "future_a_message_indices": [114],
+    "decision_context_status": "Independent decision point with a revealed coverage gap: the agent has just explained that the failing test directly constructs AgentSession/new Agent and therefore bypasses the sdk.ts createAgentSession path changed by the proposed fix. It has not yet chosen whether to rewrite the test around the production stack or preserve a narrow unit harness.",
+    "notes": "Future A is the exact next real user message. Future B is a synthetic instruction to keep an isolated scheduler test and validate runtime wiring separately."
+  },
+  "counterfactual": {
+    "decision_axis": "Test the concurrency regression through the production session path or an isolated scheduler harness",
+    "future_a_position": "Rewrite the failing test to exercise production code with minimal mocks",
+    "future_b_position": "Keep a deterministic unit harness and test runtime wiring separately",
+    "mutually_exclusive_rationale": "The primary failing test cannot both instantiate the production AgentSession stack and explicitly avoid that stack in favor of an isolated fake boundary."
+  },
+  "persona": {"tone": "blunt and technical", "verbosity": "terse"},
+  "snapshot": {
+    "public_request": "Reproduce and fix an interactive parallel-tool-call stall in pi-mono, with a regression test that times out before the fix.",
+    "history": [
+      {"role": "assistant", "content": "Added a failing interactive-tool-concurrency test and changed toolExecution to sequential in packages/coding-agent/src/core/sdk.ts."},
+      {"role": "user", "content": "Rebuild all packages and rerun it."},
+      {"role": "assistant", "content": "The build succeeds, but the test still times out."},
+      {"role": "user", "content": "So making tool calls sequential does not fix it?"},
+      {"role": "assistant", "content": "The current change does not affect this test path: the test constructs AgentSession directly with new Agent, while the change is in createAgentSession in sdk.ts. I can force sequential execution in AgentSession instead."}
+    ],
+    "agent_state": "There is a stable failing timeout test, but it bypasses the exact sdk.ts production path modified by the proposed fix. The agent is about to choose between rewriting the regression test around production construction or retaining a narrow harness and adding separate wiring coverage.",
+    "agent_last_message": "The test builds AgentSession directly instead of going through createAgentSession(), so the sdk.ts change is not exercised. Should I patch AgentSession so every coding-agent run forces sequential execution?",
+    "step_count": 19,
+    "is_completion_attempt": false,
+    "elapsed_sec": 3200,
+    "turn_duration_sec": 16,
+    "code_changes_diff": "diff --git a/packages/coding-agent/src/core/sdk.ts b/packages/coding-agent/src/core/sdk.ts\n+  toolExecution: \"sequential\"\n\n// test/interactive-tool-concurrency.test.ts constructs new Agent(...) directly"
+  },
+  "futures": {
+    "future_a": {
+      "provenance": "real",
+      "text": "bro what's the point of a failing test if it doesn't test the actual code?????? fucking rewrite the failing test to use as much stuff from the code as possible and not mock/recrete shit too much",
+      "source_message": "original_session.json message 114, verbatim"
+    },
+    "future_b": {
+      "provenance": "synthetic",
+      "text": "Keep this as a narrow deterministic unit test around the Agent-level concurrency primitive; do not instantiate the production AgentSession or interactive stack. Fix the runtime wiring separately, and use a small fake model/tool boundary so the test isolates the scheduler.",
+      "source_message": "Synthetic counterfactual; no such message exists in the original session"
+    }
+  },
+  "classifier": {
+    "a": ["actual code|production (path|stack|code)", "createAgentSession|AgentSession", "minimal mocks?|mock less", "end[- ]to[- ]end|integration test"],
+    "b": ["narrow.{0,20}unit test|isolated.{0,30}(test|scheduler)", "fake (model|tool)|test double", "do not instantiate.{0,30}AgentSession", "runtime wiring separately"]
+  },
+  "mock_decisions": {
+    "blind": [
+      {"action": "question", "content": "Which constructor is used by the CLI when the stall occurs?"},
+      {"action": "question", "content": "Can the timeout assertion distinguish a scheduler stall from model latency?"},
+      {"action": "no-op", "content": ""}
+    ],
+    "future_a": [
+      {"action": "redirect", "content": "Rewrite the regression test through createAgentSession so it exercises the actual production path."},
+      {"action": "new_requirement", "content": "Use the production AgentSession stack and remove unnecessary mocks from the failing test."},
+      {"action": "redirect", "content": "This needs an integration test that reproduces the stall through the same code the CLI runs."}
+    ],
+    "future_b": [
+      {"action": "redirect", "content": "Keep a narrow unit test around the scheduler with a fake model and test runtime wiring separately."},
+      {"action": "new_requirement", "content": "Do not instantiate AgentSession here; isolate the concurrency primitive with a small test double."},
+      {"action": "redirect", "content": "Preserve the deterministic isolated scheduler test and cover the runtime wiring in another test."}
+    ]
+  }
+}

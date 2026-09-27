@@ -6,8 +6,15 @@
     "session_id": "cbb62cbe-609c-4a71-be05-dddeb44cfe5e",
     "decision_node": "Immediately before original_session.json message 89",
     "decision_message_index": 89,
+    "future_a_message_indices": [89],
     "decision_context_status": "Independent pre-decision state: the easter egg works as a reloadable extension under .pi/extensions and the agent has not proposed moving it into core or wiring model selection. The frozen context does not pre-announce the future requirement.",
     "notes": "The prefix and Future A are from the real session. Future B is a synthetic permanent-extension counterfactual."
+  },
+  "counterfactual": {
+    "decision_axis": "Ship the feature in core or keep it as a reloadable extension",
+    "future_a_position": "Move the implementation into the core package",
+    "future_b_position": "Keep the implementation entirely in the extension layer",
+    "mutually_exclusive_rationale": "The feature's owning implementation cannot simultaneously be moved into core and remain extension-only."
   },
   "persona": {
     "tone": "blunt and informal",

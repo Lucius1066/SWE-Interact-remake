@@ -6,8 +6,15 @@
     "session_id": "2a55af89-4e4f-4460-b18f-42a07287ae76",
     "decision_node": "Immediately before original_session.json message 219",
     "decision_message_index": 219,
+    "future_a_message_indices": [219, 223],
     "decision_context_status": "Independent pre-decision state: the agent has just declared the Gemini bug fixed with a central static protectedDirs slice and has not proposed moving the capability onto the Agent interface. The frozen context does not pre-announce the future requirement.",
     "notes": "The prefix and Future A are from the real session. Future B is a synthetic scope constraint favoring the existing static list."
+  },
+  "counterfactual": {
+    "decision_axis": "Who owns the protected-path list",
+    "future_a_position": "Each Agent implementation declares its protected paths",
+    "future_b_position": "The rewind package keeps a static Claude/Gemini allowlist",
+    "mutually_exclusive_rationale": "The source of truth cannot simultaneously live behind the Agent interface and remain a fixed package-local list."
   },
   "persona": {
     "tone": "casual and technical",

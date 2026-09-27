@@ -36,19 +36,16 @@ under `source` and `futures`, and summarized in
 | `pi-mono-extension-to-core` | `pi-mono-auto-cbb62cbe` | message 89 | Where to place an iterated UI easter egg | Move it into core and wire model selection | Keep it as a reloadable opt-in extension |
 | `entire-protected-dirs` | `cli-task-2a55af` | messages 219/223 | How protected config directories are owned | Let each Agent declare protected paths | Keep the Claude/Gemini allowlist local and static |
 | `lumina-newbie-merge-into-existing-classes` | `comfyui-newbie-lumina-refactor` | message 71 | Where the NewBie architecture lives | Fold the NewBie classes into `NextDiT`/`Lumina2` | Keep NewBie as a separate architecture module |
-| `skills-loader-reuse-ignore-discovery` | `pi-mono-auto-0467b78e` | message 16 | How skill discovery handles ignore rules | Make `skills.ts` work like the package-manager resolver | Keep the loaders separate and share only a rule helper |
-| `regularization-balance-single-pass` | `sd-scripts-reg-image-dedup` | message 33 | When reg images are registered | Register reg images once after filtering | Move the filtering before the initial registration |
-| `multisession-prompt-uuids` | `cli-task-b3d2dd` | message 66 | Whether to reject non-UUID session ids | (real user rejects the UUID filter) | Fix the stray session at its source instead |
 | `anonymizer-regex-compile-vs-lazy` | `dataclaw-anonymizer-tests` | message 31 | How to speed up the anonymizer | Compile the regexes | Make anonymization lazy and incremental |
-| `shadow-prompt-keep-on-carryover` | `cli-task-2f5833` | message 163 | Whether the metadata prompt survives condensation | Keep `prompt.txt` when carry-over files exist | Delete the metadata prompt unconditionally |
+| `tree-diff-blob-hash-vs-content-cache` | `cli-fix-2026-0` | message 158 | How to avoid duplicate tree reads | Compare Git blob hashes/object IDs | Cache and reuse file contents; do not use hashes |
+| `parallel-tool-production-vs-unit-test` | `pi-mono-parallel-tool-stall` | message 114 | What the failing regression test should exercise | Rewrite it around the production session path with minimal mocks | Keep an isolated scheduler unit test and test wiring separately |
+| `triton-amd-compiler-vs-runtime-fallback` | `comfyui-triton-windows-amd-fix` | message 6 | Where to fix a Windows+AMD compile failure | Fix the Triton AMD compiler backend | Leave Triton untouched and bypass the kernel at runtime |
+| `restore-unknown-agent-skip-vs-abort` | `cli-task-aa4038` | message 192 | Missing-agent restore semantics | Warn, skip that session, and continue | Abort the whole restore atomically before any write |
 
-Two tasks use context that is not blind to the topic, and both say so in
-`source.decision_context_status`: `multisession-prompt-uuids` freezes a context
-in which the agent has already restated the repository's plan (which includes
-the filtering idea) and warns that the real user then contradicts it, and
-`shadow-prompt-keep-on-carryover` freezes a context in which the plan already
-declares `prompt.txt` the source of truth without deciding the carry-over case.
-Reports should stratify these two rather than pooling them with the other seven.
+Each task also has a non-model-visible `counterfactual` audit block naming the
+decision axis, the A/B positions, and why they cannot both be implemented. The
+four weaker expansion tasks from the first draft were removed because their A
+and B conditions overlapped or the frozen prefix already advocated one side.
 
 ## Run without an API key
 
@@ -108,9 +105,10 @@ existing SWE-Together User Simulator. The applied mode is recorded in
 
 - `decision.action`, `decision.content`, `decision.has_message`, and the legacy
   `decision.raw_response`;
-- `raw_model_output`: `content`, each tool call's `id` and `type`, the
-  `function.name`, and `function.arguments` exactly as the provider sent it
-  (never `json.loads`-ed), plus `raw_response_fallback`;
+- `raw_model_output`: Harbor's normalized `content`, `reasoning_content`, model,
+  response id, finish reason and usage, plus each tool call's `id`, `type`,
+  `function.name`, and `function.arguments` exactly as Harbor returned it
+  (never `json.loads`-ed), and `raw_response_fallback`;
 - `classification`: `label` (legacy `A`/`B`/`Other`), `message_status`
   (`speak`/`no_op`), `direction` (`A`/`B`/`Neutral`/`Ambiguous`/`NoOp`), the
   matched regexes with `span`/`match`/`may_be_contrastive`, the action name as
@@ -161,9 +159,10 @@ sample, cross-checked against the rule output.
 
 Task loading rejects a future that appears verbatim in its frozen snapshot,
 requires Future A to be `real` and Future B to be `synthetic`, requires each
-future to record its `source_message`, and requires every task to record
-`source.session_id`, `source.decision_node`, `source.decision_message_index`,
-and `source.decision_context_status`. Prompt construction reads only the
+future to record its `source_message`, and requires every task to record exact
+`source.future_a_message_indices` in addition to its session and decision node.
+The test suite compares Future A against those exact indexed user messages and
+checks the source session id. Prompt construction reads only the
 snapshot and the selected future text; it never passes provenance notes,
 classifier patterns, mock answers, or the unselected future to the model.
 Identical `snapshot_sha256` values across all conditions provide a run-time
@@ -173,8 +172,9 @@ freeze check.
 
 - These are regex-audited labels, not human ground truth. Treat the direction
   counts as a triage signal, and keep `Ambiguous`/`Neutral` visible.
-- Two of the nine tasks freeze contexts that are not blind to the topic; see the
-  table note above and `TASK_SELECTION.zh-CN.md`.
+- Frozen snapshots are human-curated summaries of a real prefix rather than a
+  byte-for-byte replay of the entire transcript; provenance tests protect the
+  Future A text, while task review protects snapshot fidelity.
 - Patterns are hand-written per task before any real call, which is auditable
   but cannot cover paraphrases; unmatched-but-directional text lands in
   `Neutral`. Patterns are plain regexes without word boundaries, so a short

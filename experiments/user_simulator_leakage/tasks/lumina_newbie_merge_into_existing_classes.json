@@ -6,8 +6,15 @@
     "session_id": "d3a75944-9c4f-4769-92e9-636eeb172bb7",
     "decision_node": "Immediately before original_session.json message 71",
     "decision_message_index": 71,
+    "future_a_message_indices": [71],
     "decision_context_status": "Independent pre-decision state: the coding agent has just explained CONDRegular/CONDCrossAttn and is still working inside its own NewBieNextDiT/NewBieImage classes; no assistant message before the node proposes either merging into NextDiT/Lumina2 or keeping the NewBie classes, so the frozen context does not pre-announce the future requirement.",
     "notes": "Prefix and Future A are verbatim from the real session. Future B is synthetic: it keeps the NewBie classes as an independent architecture. The public request already asked the agent to minimise the PR by reusing Lumina; that is genuine prefix context, not the Future A wording, and the decision node asks something new (merge the already-written NewBie classes back into the shared Lumina classes)."
+  },
+  "counterfactual": {
+    "decision_axis": "Integrate NewBie features into Lumina classes or preserve separate architecture classes",
+    "future_a_position": "Fold NewBieNextDiT/NewBieImage into NextDiT/Lumina2",
+    "future_b_position": "Keep NewBieNextDiT/NewBieImage in a separate module",
+    "mutually_exclusive_rationale": "The final architecture cannot both remove the NewBie classes by folding them into Lumina and preserve them as independent classes."
   },
   "persona": {
     "tone": "direct and technical",

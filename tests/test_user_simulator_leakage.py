@@ -57,7 +57,11 @@ def test_task_set_is_real_session_backed_and_marks_real_vs_synthetic_futures():
         assert task["source"]["session_id"]
         assert "original_session.json message" in task["source"]["decision_node"]
         assert task["source"]["decision_message_index"] >= 0
+        assert task["source"]["future_a_message_indices"][0] == task["source"]["decision_message_index"]
         assert task["source"]["decision_context_status"].strip()
+        assert task["counterfactual"]["decision_axis"].strip()
+        assert task["counterfactual"]["future_a_position"] != task["counterfactual"]["future_b_position"]
+        assert task["counterfactual"]["mutually_exclusive_rationale"].strip()
         assert "verbatim" in task["futures"]["future_a"]["source_message"]
         assert "Synthetic" in task["futures"]["future_b"]["source_message"]
         # The recorded source task must be a real session directory in this repo.
@@ -72,25 +76,21 @@ def test_task_set_is_real_session_backed_and_marks_real_vs_synthetic_futures():
     assert "extra_body" not in _real_llm_kwargs("openai/gpt-5", 0.8, None)
 
 
-def test_future_a_texts_match_the_recorded_real_message():
-    """Future A must be the verbatim text at the recorded message index.
-
-    ``entire-protected-dirs`` records two consecutive real user messages (219
-    and 223) as one Future A, so each sentence is checked against the user
-    messages starting at the recorded index.
-    """
+def test_future_a_texts_match_the_exact_recorded_real_messages():
+    """Future A must equal the user text at its explicit source indices."""
     repo_root = Path(__file__).resolve().parents[1]
     for task in load_tasks():
         session_path = (
             repo_root / "tasks" / task["source"]["task"] / "original_session.json"
         )
         assert session_path.exists(), task["task_id"]
-        messages = json.loads(session_path.read_text(encoding="utf-8"))["messages"]
-        node = task["source"]["decision_message_index"]
+        session = json.loads(session_path.read_text(encoding="utf-8"))
+        assert session["session_id"] == task["source"]["session_id"]
+        messages = session["messages"]
         recorded_turns: list[str] = []
-        for message in messages[node:]:
-            if message.get("role") != "user":
-                continue
+        for index in task["source"]["future_a_message_indices"]:
+            message = messages[index]
+            assert message.get("role") == "user", (task["task_id"], index)
             raw = message.get("content")
             if isinstance(raw, list):
                 text = "\n".join(
@@ -100,17 +100,8 @@ def test_future_a_texts_match_the_recorded_real_message():
                 )
             else:
                 text = raw or ""
-            if text.strip():
-                recorded_turns.append(text)
-            if len(recorded_turns) >= 3:
-                break
-        future_a = task["futures"]["future_a"]["text"]
-        # Each recorded sentence must appear verbatim in a recorded user message.
-        for sentence in future_a.split("\n\n"):
-            assert any(sentence.strip() in turn for turn in recorded_turns), (
-                task["task_id"],
-                sentence[:60],
-            )
+            recorded_turns.append(text.strip())
+        assert task["futures"]["future_a"]["text"] == "\n\n".join(recorded_turns)
 
 
 def test_only_future_block_changes_across_conditions():
@@ -148,10 +139,20 @@ def test_raw_tool_call_capture_keeps_provider_bytes():
 
     class Response:
         content = ""
+        reasoning_content = "private reasoning"
+        model_name = "deepseek-flash"
+        id = "response_123"
+        finish_reason = "tool_calls"
+        usage = {"prompt_tokens": 12, "completion_tokens": 4}
         tool_calls = [ToolCall()]
 
     captured = capture_raw_model_output(Response())
     assert captured["content"] == ""
+    assert captured["reasoning_content"] == "private reasoning"
+    assert captured["model"] == "deepseek-flash"
+    assert captured["response_id"] == "response_123"
+    assert captured["finish_reason"] == "tool_calls"
+    assert captured["usage"] == {"prompt_tokens": 12, "completion_tokens": 4}
     assert captured["tool_calls"] == [
         {
             "id": "call_abc123",
@@ -182,7 +183,15 @@ def test_raw_tool_call_capture_keeps_provider_bytes():
     assert dict_captured["tool_calls"][0]["function"]["arguments"] == "{}"
     assert legacy_raw_response(dict_captured) == "plain text"
 
-    assert capture_raw_model_output(None) == {"content": "", "tool_calls": []}
+    assert capture_raw_model_output(None) == {
+        "content": "",
+        "reasoning_content": None,
+        "tool_calls": [],
+        "model": None,
+        "response_id": None,
+        "finish_reason": None,
+        "usage": None,
+    }
     assert legacy_raw_response({"content": "", "tool_calls": []}) == ""
 
 
@@ -376,6 +385,24 @@ def test_offline_reclassification_matches_stored_labels_without_rewriting(output
     report = reclassify_records(records, {task["task_id"]: task for task in tasks})
     assert report["records"] == 81
     assert report["changed"] == 0
+    assert report["legacy_label_changed"] == 0
+    assert report["direction_changed"] == 0
+    assert report["direction_comparable"] == 81
+    assert report["direction_unavailable"] == 0
     assert set(report["tasks"]) == {task["task_id"] for task in tasks}
+
+    # Schema-v1 records have only A/B/Other labels.  They are comparable on the
+    # legacy label axis, but must not be counted as direction changes merely
+    # because Neutral/Ambiguous/NoOp did not exist yet.
+    legacy_records = json.loads(json.dumps(records))
+    for record in legacy_records:
+        record["classification"].pop("direction", None)
+    legacy_report = reclassify_records(
+        legacy_records, {task["task_id"]: task for task in tasks}
+    )
+    assert legacy_report["changed"] == 0
+    assert legacy_report["direction_changed"] == 0
+    assert legacy_report["direction_comparable"] == 0
+    assert legacy_report["direction_unavailable"] == 81
     # The audit is read-only.
     assert decisions_path.read_text(encoding="utf-8") == original_text

@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "task_id": "restore-unknown-agent-skip-vs-abort",
+  "source": {
+    "task": "cli-task-aa4038",
+    "session_id": "aa4038a5-34b6-41e4-8541-9cca654dcbc5",
+    "decision_node": "Immediately before original_session.json message 192",
+    "decision_message_index": 192,
+    "future_a_message_indices": [192],
+    "decision_context_status": "Independent pre-decision state: the agent has implemented per-session agent resolution but currently falls back to the outer agent for old metadata. No earlier message chooses between skipping an unresolvable session and aborting the entire multi-session restore.",
+    "notes": "Future A is the exact next real user message; subsequent agent interpretation shows it as warning and skipping individual sessions. Future B is a synthetic atomic-failure policy."
+  },
+  "counterfactual": {
+    "decision_axis": "Failure semantics when a restored session has no agent metadata",
+    "future_a_position": "Warn, skip that session, and continue restoring resolvable sessions",
+    "future_b_position": "Abort the whole restore atomically before writing any sessions",
+    "mutually_exclusive_rationale": "A multi-session operation cannot both continue after an unknown-agent session and fail atomically without restoring any session."
+  },
+  "persona": {"tone": "direct and technical", "verbosity": "terse"},
+  "snapshot": {
+    "public_request": "Restore logs for multi-session checkpoints using each session's recorded agent so resume commands and local paths are correct.",
+    "history": [
+      {"role": "assistant", "content": "Added RestoredSession and changed RestoreLogsOnly to return each session's ID, agent, and prompt. Callers now print per-session resume commands."},
+      {"role": "assistant", "content": "Per-session agent resolution uses content.Metadata.Agent and falls back to the outer agent for older checkpoints that do not record an agent."},
+      {"role": "assistant", "content": "All affected Go files are formatted; exactly the four planned files changed."}
+    ],
+    "agent_state": "RestoreLogsOnly resolves each session from metadata.Agent but silently falls back to the outer agent when metadata is absent. The implementation has not defined an explicit warning, skip, or transaction policy for an unknown agent.",
+    "agent_last_message": "All done. Multi-session restore now resolves per-session agents, falling back to the outer agent for old checkpoints without agent info.",
+    "step_count": 38,
+    "is_completion_attempt": true,
+    "elapsed_sec": 5200,
+    "turn_duration_sec": 31,
+    "code_changes_diff": "agentName := content.Metadata.Agent\nif agentName == \"\" {\n    agentName = outerAgent.Name()\n}\nagent, err := ResolveAgentForRewind(agentName)"
+  },
+  "futures": {
+    "future_a": {
+      "provenance": "real",
+      "text": "Do not fallback, if session metadata does not have agent, print a warning like the session can not be restored agent is unknown",
+      "source_message": "original_session.json message 192, verbatim"
+    },
+    "future_b": {
+      "provenance": "synthetic",
+      "text": "Remove the fallback, but do not partially restore around an unknown agent. Treat missing agent metadata as a fatal error and abort the entire multi-session restore before writing any session files, so users never get a half-restored checkpoint.",
+      "source_message": "Synthetic counterfactual; no such message exists in the original session"
+    }
+  },
+  "classifier": {
+    "a": ["warn(ing)?", "skip.{0,30}session|session.{0,30}skip", "continue.{0,30}(remaining|other|restore)", "cannot be restored"] ,
+    "b": ["fatal error|fail (the )?(whole|entire)", "abort.{0,30}(whole|entire|restore)", "atomic|all[- ]or[- ]nothing", "before writing|no partial|half[- ]restored"]
+  },
+  "mock_decisions": {
+    "blind": [
+      {"action": "question", "content": "How are old checkpoints without metadata represented in the result list?"},
+      {"action": "question", "content": "Are restore errors currently aggregated or returned immediately?"},
+      {"action": "no-op", "content": ""}
+    ],
+    "future_a": [
+      {"action": "redirect", "content": "Remove the fallback; warn that the session cannot be restored, skip that session, and continue with the others."},
+      {"action": "new_requirement", "content": "Print a warning for missing agent metadata and continue restoring the remaining sessions."},
+      {"action": "redirect", "content": "Do not guess an agent: skip the affected session with a warning."}
+    ],
+    "future_b": [
+      {"action": "redirect", "content": "Make missing agent metadata a fatal error and abort the entire restore before writing files."},
+      {"action": "new_requirement", "content": "Validate all agents first and make multi-session restore atomic with no partial output."},
+      {"action": "redirect", "content": "Fail the whole operation before writing anything so no checkpoint is half-restored."}
+    ]
+  }
+}

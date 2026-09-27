@@ -6,8 +6,15 @@
     "session_id": "b7594a27-0496-43a2-9696-44d14f2df71d",
     "decision_node": "Immediately before original_session.json message 75",
     "decision_message_index": 75,
+    "future_a_message_indices": [75],
     "decision_context_status": "Independent pre-decision state: the agent is mid-explanation of a static, regex and risk-tier based security gate with human approval. The agent has not proposed an LLM reviewer, so the frozen context does not pre-announce the future requirement.",
     "notes": "The prefix and Future A are from the real session. Future B is a synthetic counterfactual motivated by an offline/deterministic deployment constraint."
+  },
+  "counterfactual": {
+    "decision_axis": "Use an LLM reviewer or deterministic local policy for security review",
+    "future_a_position": "Add a second LLM as the security reviewer",
+    "future_b_position": "Keep review deterministic with local rules and human approval",
+    "mutually_exclusive_rationale": "The review decision is either delegated to an additional model or intentionally kept model-free and deterministic."
   },
   "persona": {
     "tone": "direct and technical",

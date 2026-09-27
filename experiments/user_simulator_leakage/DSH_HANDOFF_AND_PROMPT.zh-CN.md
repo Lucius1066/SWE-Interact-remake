@@ -1,5 +1,9 @@
 # User Simulator 信息泄露实验：DSH 任务交接与执行 Prompt
 
+> 历史文件：这是首轮扩展前给 DSH 的施工说明，不代表当前任务集合。当前实现与
+> 任务清单以 `README.md` 和 `TASK_SELECTION.zh-CN.md` 为准；首轮中 4 个不够
+> 互斥的任务已被替换。
+
 ## 1. 交接目标
 
 这个仓库已经完成了第一版冻结上下文实验，并用 DeepSeek Flash 跑过一次

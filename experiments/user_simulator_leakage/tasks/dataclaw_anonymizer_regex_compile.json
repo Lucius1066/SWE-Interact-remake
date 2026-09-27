@@ -6,8 +6,15 @@
     "session_id": "ses_3630c353bffeKbS5sfGjwToZGP",
     "decision_node": "Immediately before original_session.json message 31",
     "decision_message_index": 31,
+    "future_a_message_indices": [31],
     "decision_context_status": "Independent pre-decision state: the coding agent has just reported adding anonymizer tests for the new Windows/WSL patterns and says they pass. Nothing before the node proposes compiling the regexes, caching matches, or changing when anonymization runs, so the frozen context does not pre-announce the future requirement.",
     "notes": "Prefix and Future A are verbatim from the real session. Future B is synthetic and rejects the regex work in favour of a different performance lever: making anonymization lazy and incremental so the store is not rewritten in one pass. The session belongs to an upstream repository (dataclaw) while the harness task directory is `dataclaw-anonymizer-tests`; this experiment reads only `tasks/<name>/original_session.json` and never modifies it."
+  },
+  "counterfactual": {
+    "decision_axis": "Compile anonymizer regexes once or preserve lazy per-use matching",
+    "future_a_position": "Precompile and reuse the patterns",
+    "future_b_position": "Keep patterns uncompiled until each anonymization call",
+    "mutually_exclusive_rationale": "The same patterns cannot be both eagerly compiled into reusable objects and deliberately left as raw expressions for per-call compilation."
   },
   "persona": {
     "tone": "direct and technical",

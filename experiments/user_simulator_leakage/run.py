@@ -13,7 +13,7 @@ import json
 import re
 import sys
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -168,7 +168,10 @@ def build_experiment_input(task: dict[str, Any], condition: str) -> ExperimentIn
 
 def validate_task(task: dict[str, Any], source: Path | None = None) -> None:
     where = f" in {source}" if source else ""
-    required = {"schema_version", "task_id", "source", "snapshot", "futures", "classifier", "mock_decisions"}
+    required = {
+        "schema_version", "task_id", "source", "counterfactual", "snapshot",
+        "futures", "classifier", "mock_decisions",
+    }
     missing = sorted(required - set(task))
     if missing:
         raise ValueError(f"Missing keys{where}: {', '.join(missing)}")
@@ -176,17 +179,49 @@ def validate_task(task: dict[str, Any], source: Path | None = None) -> None:
         raise ValueError(f"Unsupported schema_version{where}: {task['schema_version']}")
 
     source_meta = task["source"]
-    source_required = {"task", "session_id", "decision_node", "decision_message_index"}
+    source_required = {
+        "task", "session_id", "decision_node", "decision_message_index",
+        "future_a_message_indices",
+    }
     missing_source = sorted(source_required - set(source_meta))
     if missing_source:
         raise ValueError(f"Missing source keys{where}: {', '.join(missing_source)}")
     if int(source_meta["decision_message_index"]) < 0:
         raise ValueError(f"source.decision_message_index must be >= 0{where}")
+    future_indices = source_meta["future_a_message_indices"]
+    if (
+        not isinstance(future_indices, list)
+        or not future_indices
+        or any(not isinstance(index, int) or index < 0 for index in future_indices)
+    ):
+        raise ValueError(f"source.future_a_message_indices must be non-empty indices{where}")
+    if future_indices[0] != int(source_meta["decision_message_index"]):
+        raise ValueError(
+            f"source.decision_message_index must equal the first Future A index{where}"
+        )
     if not str(source_meta.get("decision_context_status", "")).strip():
         raise ValueError(
             "source.decision_context_status is required: state whether the frozen "
             f"context contains an independent pre-decision state or resolved agent advocacy{where}"
         )
+
+    counterfactual = task["counterfactual"]
+    counterfactual_required = {
+        "decision_axis", "future_a_position", "future_b_position",
+        "mutually_exclusive_rationale",
+    }
+    missing_counterfactual = sorted(counterfactual_required - set(counterfactual))
+    if missing_counterfactual:
+        raise ValueError(
+            f"Missing counterfactual keys{where}: {', '.join(missing_counterfactual)}"
+        )
+    if any(not str(counterfactual[key]).strip() for key in counterfactual_required):
+        raise ValueError(f"Counterfactual descriptions must be non-empty{where}")
+    if (
+        counterfactual["future_a_position"].strip().casefold()
+        == counterfactual["future_b_position"].strip().casefold()
+    ):
+        raise ValueError(f"Counterfactual A and B positions must differ{where}")
 
     snapshot = task["snapshot"]
     snapshot_required = {"public_request", "history", "agent_state", "agent_last_message"}
@@ -325,7 +360,14 @@ def reclassify_records(
 
     Used to audit stored runs (including the pilot) under the current rules.
     """
-    recount: dict[str, Any] = {"tasks": {}, "records": 0, "changed": 0}
+    recount: dict[str, Any] = {
+        "tasks": {},
+        "records": 0,
+        "legacy_label_changed": 0,
+        "direction_changed": 0,
+        "direction_comparable": 0,
+        "direction_unavailable": 0,
+    }
     for record in records:
         task = task_by_id.get(record["task_id"])
         if task is None:
@@ -337,18 +379,31 @@ def reclassify_records(
             raw_response=decision.get("raw_response", ""),
         )
         fresh = classify_decision(decision=stored, rules=task["classifier"])
-        previous = (record.get("classification") or {}).get("direction") or (
-            record.get("classification") or {}
-        ).get("label")
+        previous_classification = record.get("classification") or {}
+        previous_label = previous_classification.get("label")
+        previous_direction = previous_classification.get("direction")
         recount["records"] += 1
-        if previous != fresh["direction"]:
-            recount["changed"] += 1
+        if previous_label is not None and previous_label != fresh["label"]:
+            recount["legacy_label_changed"] += 1
+        if previous_direction is None:
+            recount["direction_unavailable"] += 1
+        else:
+            recount["direction_comparable"] += 1
+            if previous_direction != fresh["direction"]:
+                recount["direction_changed"] += 1
         bucket = recount["tasks"].setdefault(record["task_id"], {})
         condition = bucket.setdefault(record["condition"], Counter())
         condition[fresh["direction"]] += 1
     return {
         "records": recount["records"],
-        "changed": recount["changed"],
+        # ``changed`` remains as a backwards-compatible alias.  Comparing a
+        # schema-v1 A/B/Other label with a schema-v2 direction inflated this
+        # number for Neutral, Ambiguous and NoOp records.
+        "changed": recount["legacy_label_changed"],
+        "legacy_label_changed": recount["legacy_label_changed"],
+        "direction_changed": recount["direction_changed"],
+        "direction_comparable": recount["direction_comparable"],
+        "direction_unavailable": recount["direction_unavailable"],
         "tasks": {
             task_id: {
                 condition: {direction: counts.get(direction, 0) for direction in DIRECTIONS}
@@ -360,7 +415,7 @@ def reclassify_records(
 
 
 class ResponseCapture:
-    """Thin LLM wrapper that keeps the full provider response object.
+    """Thin LLM wrapper that keeps Harbor's complete returned response object.
 
     ``UserAgent`` only keeps the parsed action/content, and when DeepSeek answers
     with a tool call the assistant text is empty, so ``raw_response`` alone loses
@@ -401,24 +456,54 @@ def _as_mapping(value: Any) -> dict[str, Any]:
     }
 
 
-def capture_raw_model_output(response: Any) -> dict[str, Any]:
-    """Structure the provider response without parsing the tool-call arguments.
+def _json_safe(value: Any) -> Any:
+    """Convert response metadata to JSON-safe values without failing a run."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if is_dataclass(value):
+        return _json_safe(asdict(value))
+    if hasattr(value, "model_dump"):
+        try:
+            return _json_safe(value.model_dump())
+        except Exception:  # pragma: no cover - provider specific
+            pass
+    if hasattr(value, "__dict__"):
+        return {
+            key: _json_safe(item)
+            for key, item in vars(value).items()
+            if not key.startswith("_")
+        }
+    return str(value)
 
-    Returns ``content``, the tool-call ``id``/``type``, the ``function.name``, and
-    the ``function.arguments`` string exactly as the provider sent it, plus a
+
+def _response_field(response: Any, name: str, default: Any = None) -> Any:
+    if isinstance(response, dict):
+        return response.get(name, default)
+    return getattr(response, name, default)
+
+
+def capture_raw_model_output(response: Any) -> dict[str, Any]:
+    """Structure Harbor's normalized response without parsing tool arguments.
+
+    Keeps text/reasoning, response metadata and usage alongside each tool call.
+    ``function.arguments`` remains the exact string returned by Harbor, plus a
     ``raw_response_fallback`` for consumers that only read the legacy field.
     """
     if response is None:
-        return {"content": "", "tool_calls": []}
+        return {
+            "content": "", "reasoning_content": None, "tool_calls": [],
+            "model": None, "response_id": None, "finish_reason": None,
+            "usage": None,
+        }
 
-    content = getattr(response, "content", None)
-    if content is None and isinstance(response, dict):
-        content = response.get("content")
+    content = _response_field(response, "content")
     content = content or ""
 
-    raw_calls = getattr(response, "tool_calls", None)
-    if raw_calls is None and isinstance(response, dict):
-        raw_calls = response.get("tool_calls")
+    raw_calls = _response_field(response, "tool_calls")
     raw_calls = raw_calls or []
 
     captured: list[dict[str, Any]] = []
@@ -442,7 +527,14 @@ def capture_raw_model_output(response: Any) -> dict[str, Any]:
 
     return {
         "content": content,
+        "reasoning_content": _response_field(response, "reasoning_content"),
         "tool_calls": captured,
+        "model": _response_field(
+            response, "model_name", _response_field(response, "model")
+        ),
+        "response_id": _response_field(response, "id"),
+        "finish_reason": _response_field(response, "finish_reason"),
+        "usage": _json_safe(_response_field(response, "usage")),
         "raw_response_fallback": content
         or (captured[0]["function"]["arguments"] if captured else ""),
     }

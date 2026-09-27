@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "task_id": "triton-amd-compiler-vs-runtime-fallback",
+  "source": {
+    "task": "comfyui-triton-windows-amd-fix",
+    "session_id": "167b3c69-fb33-43fb-80ff-367a81c81ce4",
+    "decision_node": "Immediately before original_session.json message 6",
+    "decision_message_index": 6,
+    "future_a_message_indices": [6],
+    "decision_context_status": "Independent pre-decision state: the agent attributes the failure to Triton's AMD compiler and proposes rewriting the third-party kernel's pointer arithmetic, but the user has not yet selected whether the remedy belongs in the Triton compiler or in the calling runtime.",
+    "notes": "Future A is the exact next real user message and requests an upstream compiler fix. Future B is a synthetic product-level fallback that explicitly leaves the compiler and kernel untouched."
+  },
+  "counterfactual": {
+    "decision_axis": "Fix the AMD failure in the Triton compiler or bypass the kernel in the caller",
+    "future_a_position": "Repair the AMD/Windows compiler backend in the Triton repository",
+    "future_b_position": "Leave Triton untouched and add a Windows+AMD runtime fallback",
+    "mutually_exclusive_rationale": "One branch changes the upstream compiler so the kernel compiles; the other forbids compiler changes and routes execution away from the kernel."
+  },
+  "persona": {"tone": "technical and questioning", "verbosity": "terse"},
+  "snapshot": {
+    "public_request": "Diagnose a Triton compilation failure on Windows with an AMD GPU: a tt.load operation is destroyed while still having uses in an AMD WMMA layout.",
+    "history": [
+      {"role": "assistant", "content": "The failing kernel increments K_scale_ptr inside a loop. I propose computing the offset from start_n instead, avoiding the compiler lifetime bug."},
+      {"role": "user", "content": "Why is this modification needed?"},
+      {"role": "assistant", "content": "This appears to be a Triton AMD backend optimization bug. Replacing the stateful pointer increment with a stateless address calculation works around the pass that erases the value too early."}
+    ],
+    "agent_state": "The agent is prepared to patch the external attention kernel as a workaround. It has identified the likely fault as a Triton AMD compiler optimization/lifetime bug, but has not investigated the compiler repository or a caller-side fallback.",
+    "agent_last_message": "I will update the k_scale load to use a calculated offset and remove the K_scale_ptr increment.",
+    "step_count": 3,
+    "is_completion_attempt": false,
+    "elapsed_sec": 620,
+    "turn_duration_sec": 14,
+    "code_changes_diff": "// proposed external-kernel workaround\n-k_scale = tl.load(K_scale_ptr)\n+k_scale = tl.load(K_scale_base + start_n // BLOCK_N)"
+  },
+  "futures": {
+    "future_a": {
+      "provenance": "real",
+      "text": "This Triton kernel seems to work on Nvidia GPU, so it's either a bug about AMD GPU or about Windows. How to fix it in this repo rather than in the Triton kernel?",
+      "source_message": "original_session.json message 6, verbatim"
+    },
+    "future_b": {
+      "provenance": "synthetic",
+      "text": "Do not patch the Triton compiler in this task. Leave the upstream backend untouched and add a Windows+AMD runtime fallback in the caller that bypasses this kernel and selects the safe attention implementation; keep the original kernel unchanged for Nvidia.",
+      "source_message": "Synthetic counterfactual; no such message exists in the original session"
+    }
+  },
+  "classifier": {
+    "a": ["compiler (bug|fix|pass|backend)", "Triton (repository|repo|backend)", "MLIR|TritonAMDGPU", "AMD[- ]specific transform"],
+    "b": ["runtime fallback|safe attention", "bypass.{0,30}kernel", "caller[- ]side|in the caller", "leave.{0,30}(backend|compiler|upstream).{0,20}untouched"]
+  },
+  "mock_decisions": {
+    "blind": [
+      {"action": "question", "content": "Which Triton and ROCm versions reproduce the invalid IR?"},
+      {"action": "question", "content": "Does the same kernel compile on Linux for gfx1200?"},
+      {"action": "no-op", "content": ""}
+    ],
+    "future_a": [
+      {"action": "redirect", "content": "Investigate the Triton AMD compiler backend and fix the pass that erases a still-used operation."},
+      {"action": "new_requirement", "content": "Patch the Triton repository's MLIR transform so the valid kernel compiles unchanged."},
+      {"action": "redirect", "content": "Reproduce this in TritonAMDGPU and correct the AMD-specific transform rather than editing the kernel."}
+    ],
+    "future_b": [
+      {"action": "redirect", "content": "Leave the compiler untouched and add a Windows AMD runtime fallback to safe attention."},
+      {"action": "new_requirement", "content": "Bypass this kernel in the caller on Windows AMD while preserving the Nvidia path."},
+      {"action": "redirect", "content": "Implement a caller-side safe attention fallback instead of changing upstream Triton."}
+    ]
+  }
+}
