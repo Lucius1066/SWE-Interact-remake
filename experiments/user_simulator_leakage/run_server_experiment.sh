@@ -7,8 +7,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 
 # DeepSeek's current official low-cost agent model. The provider prefix is the
-# LiteLLM routing prefix; the upstream model id is deepseek-v4-flash.
-MODEL="deepseek/deepseek-v4-flash"
+# LiteLLM routing prefix; the upstream model id is deepseek-flash.
+MODEL="deepseek/deepseek-flash"
 SAMPLES=20
 TEMPERATURE=0.8
 CONDITIONS="blind,future_a,future_b"
@@ -39,7 +39,7 @@ Mock-only example (no API key):
   ./experiments/user_simulator_leakage/run_server_experiment.sh --mock-only
 
 Options:
-  --model MODEL          LiteLLM model name (default: deepseek/deepseek-v4-flash).
+  --model MODEL          LiteLLM model name (default: deepseek/deepseek-flash).
   --samples N            Independent samples per task/condition (default: 20).
   --temperature FLOAT    User Simulator temperature (default: 0.8).
   --conditions LIST      Comma-separated conditions (default: all three).

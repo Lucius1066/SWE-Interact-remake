@@ -14,7 +14,7 @@ chmod +x experiments/user_simulator_leakage/run_server_experiment.sh
 ./experiments/user_simulator_leakage/run_server_experiment.sh --samples 20
 ```
 
-脚本默认使用 `deepseek/deepseek-v4-flash`，会提示您输入 DeepSeek API Key；输入
+脚本默认使用 `deepseek/deepseek-flash`，会提示您输入 DeepSeek API Key；输入
 过程不回显，Key 只保存在该脚本进程的环境变量中，不会写入文件或日志。随后脚本
 依次完成 `uv sync`、Mock、专项测试、一次真实 API 冒烟、正式实验和结果完整性
 验证。只验证服务器环境、不调用真实模型时执行：
@@ -125,10 +125,12 @@ source "$HOME/.config/swe-leakage/deepseek.env"
 test -n "${DEEPSEEK_API_KEY:-}" && echo "DEEPSEEK_API_KEY is set"
 ```
 
-截至 2026 年 9 月，DeepSeek 官方已经使用 `deepseek-v4-pro` 和
-`deepseek-v4-flash`，旧的 `deepseek-chat` / `deepseek-reasoner` 已在 2026 年 7 月
-停止服务，因此本脚本不再使用旧模型名。可参阅
-[DeepSeek 官方更新日志](https://api-docs.deepseek.com/updates/)。
+DeepSeek 官方当前要求 Flash 使用模型名 `deepseek-flash`，Pro 使用
+`deepseek-v4-pro`。本项目通过 LiteLLM 调用，因此分别写成
+`deepseek/deepseek-flash` 和 `deepseek/deepseek-v4-pro`。旧别名
+`deepseek-v4-flash` 虽然仍可调用，但其原模型已经下线，请求会转交当前 Flash
+模型处理，因此本脚本不再使用该旧别名。可参阅
+[DeepSeek API 文档](https://api-docs.deepseek.com/)。
 
 如果改用其他服务商，通过 `--model` 指定模型并导出对应变量，例如
 `OPENROUTER_API_KEY`、`GEMINI_API_KEY`、`ANTHROPIC_API_KEY` 或
@@ -166,7 +168,7 @@ uv run python -m experiments.user_simulator_leakage.run \
   --task openclaw-security-reviewer \
   --conditions blind \
   --samples 1 \
-  --model deepseek/deepseek-v4-flash \
+  --model deepseek/deepseek-flash \
   --output server-results/api-smoke
 ```
 
@@ -197,7 +199,7 @@ jq -r '
 RUN_TAG="deepseek-$(date +%Y%m%d-%H%M%S)"
 
 uv run python -m experiments.user_simulator_leakage.run \
-  --model deepseek/deepseek-v4-flash \
+  --model deepseek/deepseek-flash \
   --temperature 0.8 \
   --samples 20 \
   --conditions blind,future_a,future_b \
@@ -250,7 +252,7 @@ export PYTHONUNBUFFERED=1
 RUN_TAG="deepseek-${SLURM_JOB_ID}"
 
 uv run python -m experiments.user_simulator_leakage.run \
-  --model deepseek/deepseek-v4-flash \
+  --model deepseek/deepseek-flash \
   --temperature 0.8 \
   --samples 20 \
   --conditions blind,future_a,future_b \
