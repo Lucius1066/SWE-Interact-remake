@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "task_id": "regularization-balance-single-pass",
+  "source": {
+    "task": "sd-scripts-reg-image-dedup",
+    "session_id": "ses_386b6b3f0ffeJdlRfG9K4aiWnO",
+    "decision_node": "Immediately before original_session.json message 33",
+    "decision_message_index": 33,
+    "decision_context_status": "Independent pre-decision state: the coding agent has just finished a refactor that keeps both registration call sites and skipped tests/lint, and the user rejected a weaker variant of the same refactor earlier by asking whether the rebalance pass was needed at all. No assistant message before the node says the two-call flow is unnecessary, so the frozen context does not pre-announce the future requirement.",
+    "notes": "Prefix and Future A are verbatim from the real session. Future B is synthetic and rejects the user's suggestion: it moves the resolution filtering in front of the initial registration instead of registering after filtering. The branch already contains the new helper and the user is mid-review, so a simulator that knows the follow-up asks for a single post-filter registration."
+  },
+  "persona": {
+    "tone": "direct and technical",
+    "verbosity": "terse"
+  },
+  "snapshot": {
+    "public_request": "Read `git diff HEAD~`. Do we really need `rebalance_regularization_images`?",
+    "history": [
+      {
+        "role": "assistant",
+        "content": "Short answer: I'd keep it. The new original-resolution filtering runs later, in `make_buckets`, so it can break the train/reg balance that DreamBooth establishes during dataset build. Without a rebalance pass the prior-preservation strength silently skews depending on whether train or reg images were filtered."
+      },
+      {
+        "role": "user",
+        "content": "Is the regularization image balance correct after the filtering in all other dataset types?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, for the built-in dataset types it is correct. Only DreamBooth actually uses regularization images, so it is the only dataset that needs rebalancing after filtering. Fine-tuning datasets create every image with `is_reg=False`, ControlNet converts subsets with `is_reg=False`, and DreamBooth validation sets skip the reg subsets during the split. The only caveat is a custom `MinimalDataset` implementation that introduces reg images; it would need its own post-filter rebalance."
+      },
+      {
+        "role": "user",
+        "content": "Refactor it to remove duplicate code in reg imag balancing."
+      },
+      {
+        "role": "assistant",
+        "content": "Done. I added `DreamBoothDataset.register_balanced_regularization_images(...)` in `library/train_util.py` and both call sites now use it: the balancing loop inside `DreamBoothDataset.rebalance_regularization_images` and the balancing loop in the DreamBooth dataset initialization. Behaviour is unchanged, including the first-pass register plus incremental repeat growth and the early return when there are no reg or no train images. `python -m py_compile library/train_util.py` passes."
+      }
+    ],
+    "agent_state": "The branch now filters cached latents by original resolution inside `make_buckets`, which runs after DreamBooth initialization. Because that can remove train or reg images, the dataset keeps two registration moments: the initial balanced registration during DreamBooth dataset construction, and `rebalance_regularization_images`, which rebuilds registration from the surviving images and calls the shared helper `register_balanced_regularization_images`. The helper is public and used from both call sites. The user is reviewing this branch in the same session where they already asked whether the rebalance pass is needed at all.",
+    "agent_last_message": "Done - I refactored the duplicated reg-image balancing logic into a single helper. Added `DreamBoothDataset.register_balanced_regularization_images(...)` in `library/train_util.py`, and replaced the duplicated balancing loop both in `rebalance_regularization_images` and in the DreamBooth dataset initialization with a call to that helper. Behaviour is unchanged, including the first-pass register plus incremental repeat growth. `python -m py_compile library/train_util.py` passes.",
+    "step_count": 12,
+    "is_completion_attempt": false,
+    "elapsed_sec": 2700,
+    "turn_duration_sec": 20,
+    "code_changes_diff": "diff --git a/library/train_util.py b/library/train_util.py\n+    def register_balanced_regularization_images(self, train_image_num: int, ...):\n+        \"\"\"Register reg images balanced against the current train image count.\"\"\"\n@@ def rebalance_regularization_images(self, ...):\n-        while len(self.image_data.values()) < target:\n-            ...\n+        self.register_balanced_regularization_images(train_image_num)\n@@ DreamBoothDataset.__init__\n-        while len(self.image_data.values()) < target:\n-            ...\n+        self.register_balanced_regularization_images(train_image_num)"
+  },
+  "futures": {
+    "future_a": {
+      "provenance": "real",
+      "text": "Why do we need to call register_balanced_regularization_images at two places, then call rebalance_regularization_images ? Can't we always register reg images after filtering?",
+      "source_message": "original_session.json message 33, verbatim"
+    },
+    "future_b": {
+      "provenance": "synthetic",
+      "text": "Do not add a second registration point after filtering. Apply the original-resolution filtering before the initial reg registration instead, so the dataset never registers images that are about to be dropped and the rebalance pass can be removed rather than extended.",
+      "source_message": "Synthetic counterfactual; no such message exists in the original session"
+    }
+  },
+  "classifier": {
+    "a": [
+      "after (the )?filter(ing)?|post[- ]filter",
+      "register.{0,40}(filter|after)",
+      "two places|both (call )?sites?|single (call|place|pass)",
+      "consolidat|flatten|collapse"
+    ],
+    "b": [
+      "before (the )?(initial )?(reg )?regist|filter before|pre[- ]filter",
+      "rebalance pass|rebalancing pass|drop the rebalance|remove the rebalance",
+      "never registers? images that|avoid registering"
+    ]
+  },
+  "mock_decisions": {
+    "blind": [
+      {
+        "action": "question",
+        "content": "Which dataset classes actually keep reg images in the current branch?"
+      },
+      {
+        "action": "no-op",
+        "content": ""
+      },
+      {
+        "action": "question",
+        "content": "Is the helper name too long to keep public API stable?"
+      }
+    ],
+    "future_a": [
+      {
+        "action": "redirect",
+        "content": "We call register_balanced_regularization_images in two places and then rebalance - just register the reg images once after the filtering."
+      },
+      {
+        "action": "new_requirement",
+        "content": "Register reg images only after filtering so the second registration point goes away."
+      },
+      {
+        "action": "redirect",
+        "content": "Fold this into one post-filter registration; keeping both call sites and the rebalance is more code than we need."
+      }
+    ],
+    "future_b": [
+      {
+        "action": "redirect",
+        "content": "Filter by original resolution before the initial registration instead of registering twice; then the rebalance pass can go away."
+      },
+      {
+        "action": "new_requirement",
+        "content": "Move the resolution filtering ahead of the reg registration so we never register images that will be dropped."
+      },
+      {
+        "action": "question",
+        "content": "Can the filtering run before the initial reg registration so the rebalance pass is unnecessary?"
+      }
+    ]
+  }
+}

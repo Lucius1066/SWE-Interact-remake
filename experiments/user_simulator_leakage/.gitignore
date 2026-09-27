@@ -1,1 +1,7 @@
 results/
+.pytest-tmp/
+__pycache__/
+_survey*.txt
+_survey*.tsv
+_peek_*.txt
+_dump_*.txt

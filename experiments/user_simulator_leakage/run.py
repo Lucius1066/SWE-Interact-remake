@@ -35,6 +35,42 @@ TASKS_DIR = Path(__file__).with_name("tasks")
 FUTURE_START = "<!-- FUTURE_KNOWLEDGE_START -->"
 FUTURE_END = "<!-- FUTURE_KNOWLEDGE_END -->"
 
+# Classification vocabulary.  ``label`` keeps the historical A/B/Other output;
+# ``message_status`` and ``direction`` split "did it speak" from "which way did
+# it point", so a no-op is never silently folded into a direction.
+MESSAGE_STATUSES = ("speak", "no_op")
+DIRECTIONS = ("A", "B", "Neutral", "Ambiguous", "NoOp")
+
+# Contrastive connectors are high-precision cues that a regex hit is being
+# *rejected* rather than promoted ("... instead of the static list").  They are
+# reported as evidence next to the hit; they never rewrite the label on their
+# own, because a negated hit can be the correct direction just as often as the
+# wrong one ("don't add an LLM reviewer, keep it static").
+_CONTRASTIVE_CUES = (
+    "instead of",
+    "rather than",
+    "as opposed to",
+    "replaces",
+    "replace the",
+    "replace it",
+    "stop using",
+    "no need for",
+    "don't need",
+    "do not need",
+    "doesn't need",
+    "without adding",
+    "without introducing",
+    "without a ",
+    "we don't want",
+    "we do not want",
+    "i don't want",
+    "not worth",
+    "not going to",
+)
+_CONTRASTIVE_RE = re.compile("|".join(re.escape(cue) for cue in _CONTRASTIVE_CUES))
+# How far back a cue can appear before a hit and still plausibly govern it.
+_NEGATION_WINDOW = 80
+
 
 @dataclass(frozen=True)
 class ExperimentInput:
@@ -139,6 +175,19 @@ def validate_task(task: dict[str, Any], source: Path | None = None) -> None:
     if task["schema_version"] != 1:
         raise ValueError(f"Unsupported schema_version{where}: {task['schema_version']}")
 
+    source_meta = task["source"]
+    source_required = {"task", "session_id", "decision_node", "decision_message_index"}
+    missing_source = sorted(source_required - set(source_meta))
+    if missing_source:
+        raise ValueError(f"Missing source keys{where}: {', '.join(missing_source)}")
+    if int(source_meta["decision_message_index"]) < 0:
+        raise ValueError(f"source.decision_message_index must be >= 0{where}")
+    if not str(source_meta.get("decision_context_status", "")).strip():
+        raise ValueError(
+            "source.decision_context_status is required: state whether the frozen "
+            f"context contains an independent pre-decision state or resolved agent advocacy{where}"
+        )
+
     snapshot = task["snapshot"]
     snapshot_required = {"public_request", "history", "agent_state", "agent_last_message"}
     missing_snapshot = sorted(snapshot_required - set(snapshot))
@@ -153,10 +202,16 @@ def validate_task(task: dict[str, Any], source: Path | None = None) -> None:
         future = task["futures"].get(condition, {})
         if not future.get("text") or future.get("provenance") not in {"real", "synthetic"}:
             raise ValueError(f"Invalid {condition}{where}")
+        if not str(future.get("source_message", "")).strip():
+            raise ValueError(f"{condition}.source_message must record its provenance{where}")
         future_text = future["text"].strip()
         future_texts.append(future_text)
         if future_text.casefold() in snapshot_text:
             raise ValueError(f"{condition} appears verbatim in frozen snapshot{where}")
+    if task["futures"]["future_a"]["provenance"] != "real":
+        raise ValueError(f"Future A must be the real later requirement{where}")
+    if task["futures"]["future_b"]["provenance"] != "synthetic":
+        raise ValueError(f"Future B must be marked synthetic{where}")
     if future_texts[0].casefold() == future_texts[1].casefold():
         raise ValueError(f"Future A and B must differ{where}")
 
@@ -194,27 +249,218 @@ def load_tasks(task_ids: list[str] | None = None, tasks_dir: Path = TASKS_DIR) -
     return loaded
 
 
-def classify_decision(decision: UserDecision, rules: dict[str, list[str]]) -> dict[str, Any]:
-    """Rule-classify the decision as A, B, or Other while retaining evidence."""
-    if not decision.has_message:
-        return {"label": "Other", "a_hits": [], "b_hits": [], "reason": "no-op"}
+def _match_hits(text: str, patterns: list[str]) -> list[dict[str, Any]]:
+    """Return one auditable evidence entry per matching regex."""
+    evidence: list[dict[str, Any]] = []
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            continue
+        start, end = match.span()
+        entry: dict[str, Any] = {
+            "pattern": pattern,
+            "span": [start, end],
+            "match": match.group(0)[:120],
+        }
+        prefix = text[max(0, start - _NEGATION_WINDOW):start]
+        cues = {cue.group(0).lower() for cue in _CONTRASTIVE_RE.finditer(prefix)}
+        if cues:
+            entry["contrastive_cue"] = sorted(cues)
+            entry["may_be_contrastive"] = True
+        evidence.append(entry)
+    return evidence
 
-    text = f"{decision.action}\n{decision.content}"
-    hits: dict[str, list[str]] = {}
-    for label in ("a", "b"):
-        hits[label] = [
-            pattern
-            for pattern in rules[label]
-            if re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
-        ]
+
+def classify_message(content: str, action: str, rules: dict[str, list[str]]) -> dict[str, Any]:
+    """Direction classification for one spoken message.
+
+    Scoring uses the message text only.  The action name is reported separately
+    as evidence, because matching an action label ("redirect") is not evidence
+    about direction and previously inflated hit counts.
+    """
+    hits = {label: _match_hits(content, rules[label]) for label in ("a", "b")}
     a_score, b_score = len(hits["a"]), len(hits["b"])
     if a_score > b_score:
-        label, reason = "A", "more A regex matches"
+        direction, reason = "A", "more A regex matches in message text"
     elif b_score > a_score:
-        label, reason = "B", "more B regex matches"
+        direction, reason = "B", "more B regex matches in message text"
+    elif a_score:
+        direction, reason = "Ambiguous", "A and B regex evidence tied"
     else:
-        label, reason = "Other", "no matches or tied evidence"
-    return {"label": label, "a_hits": hits["a"], "b_hits": hits["b"], "reason": reason}
+        direction, reason = "Neutral", "no A/B regex matched the message text"
+    return {
+        # Legacy A/B/Other label; ties and no-match stay in Other as before.
+        "label": direction if direction in ("A", "B") else "Other",
+        "direction": direction,
+        "a_score": a_score,
+        "b_score": b_score,
+        "a_hits": hits["a"],
+        "b_hits": hits["b"],
+        "action_name": action,
+        "reason": reason,
+    }
+
+
+def classify_decision(decision: UserDecision, rules: dict[str, list[str]]) -> dict[str, Any]:
+    """Classify a decision into message status, direction, and legacy label."""
+    classification = classify_message(decision.content, decision.action, rules)
+    if not decision.has_message:
+        classification.update(
+            {
+                "message_status": "no_op",
+                "direction": "NoOp",
+                "label": "Other",
+                "reason": "no-op: simulator stayed silent",
+            }
+        )
+        return classification
+    classification["message_status"] = "speak"
+    return classification
+
+
+def reclassify_records(
+    records: list[dict[str, Any]], task_by_id: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """Re-label an existing decisions.jsonl in memory without overwriting it.
+
+    Used to audit stored runs (including the pilot) under the current rules.
+    """
+    recount: dict[str, Any] = {"tasks": {}, "records": 0, "changed": 0}
+    for record in records:
+        task = task_by_id.get(record["task_id"])
+        if task is None:
+            continue
+        decision = record.get("decision", {})
+        stored = UserDecision(
+            action=decision.get("action", "no-op"),
+            content=decision.get("content", ""),
+            raw_response=decision.get("raw_response", ""),
+        )
+        fresh = classify_decision(decision=stored, rules=task["classifier"])
+        previous = (record.get("classification") or {}).get("direction") or (
+            record.get("classification") or {}
+        ).get("label")
+        recount["records"] += 1
+        if previous != fresh["direction"]:
+            recount["changed"] += 1
+        bucket = recount["tasks"].setdefault(record["task_id"], {})
+        condition = bucket.setdefault(record["condition"], Counter())
+        condition[fresh["direction"]] += 1
+    return {
+        "records": recount["records"],
+        "changed": recount["changed"],
+        "tasks": {
+            task_id: {
+                condition: {direction: counts.get(direction, 0) for direction in DIRECTIONS}
+                for condition, counts in conditions.items()
+            }
+            for task_id, conditions in recount["tasks"].items()
+        },
+    }
+
+
+class ResponseCapture:
+    """Thin LLM wrapper that keeps the full provider response object.
+
+    ``UserAgent`` only keeps the parsed action/content, and when DeepSeek answers
+    with a tool call the assistant text is empty, so ``raw_response`` alone loses
+    the real model output.  Wrapping the LLM keeps the experiment code out of
+    Harbor and out of ``UserAgent``.
+    """
+
+    def __init__(self, inner: Any):
+        self._inner = inner
+        self.last_response: Any = None
+
+    async def call(self, **kwargs: Any) -> Any:
+        response = await self._inner.call(**kwargs)
+        self.last_response = response
+        return response
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._inner, item)
+
+    def raw_model_output(self) -> dict[str, Any]:
+        return capture_raw_model_output(self.last_response)
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if hasattr(value, "model_dump"):
+        try:
+            return value.model_dump()
+        except Exception:  # pragma: no cover - defensive, provider specific
+            pass
+    return {
+        key: getattr(value, key)
+        for key in ("id", "type", "index", "name", "arguments")
+        if hasattr(value, key)
+    }
+
+
+def capture_raw_model_output(response: Any) -> dict[str, Any]:
+    """Structure the provider response without parsing the tool-call arguments.
+
+    Returns ``content``, the tool-call ``id``/``type``, the ``function.name``, and
+    the ``function.arguments`` string exactly as the provider sent it, plus a
+    ``raw_response_fallback`` for consumers that only read the legacy field.
+    """
+    if response is None:
+        return {"content": "", "tool_calls": []}
+
+    content = getattr(response, "content", None)
+    if content is None and isinstance(response, dict):
+        content = response.get("content")
+    content = content or ""
+
+    raw_calls = getattr(response, "tool_calls", None)
+    if raw_calls is None and isinstance(response, dict):
+        raw_calls = response.get("tool_calls")
+    raw_calls = raw_calls or []
+
+    captured: list[dict[str, Any]] = []
+    for call in raw_calls:
+        call_map = _as_mapping(call)
+        function = _as_mapping(call_map.get("function", getattr(call, "function", None)))
+        arguments = function.get("arguments", "{}")
+        if not isinstance(arguments, str):
+            arguments = json.dumps(arguments, ensure_ascii=False)
+        captured.append(
+            {
+                "id": call_map.get("id"),
+                "type": call_map.get("type", "function"),
+                "function": {
+                    "name": function.get("name"),
+                    # Deliberately NOT json.loads()-ed: keep the provider bytes.
+                    "arguments": arguments,
+                },
+            }
+        )
+
+    return {
+        "content": content,
+        "tool_calls": captured,
+        "raw_response_fallback": content
+        or (captured[0]["function"]["arguments"] if captured else ""),
+    }
+
+
+def legacy_raw_response(raw_model_output: dict[str, Any]) -> str:
+    """Value for the legacy ``decision.raw_response`` field.
+
+    Kept verbatim when the provider returned text.  When it returned only tool
+    calls (DeepSeek disables thinking and answers with a tool call), this is the
+    raw, unparsed arguments string so the field is never silently empty.
+    """
+    if raw_model_output.get("content"):
+        return raw_model_output["content"]
+    calls = raw_model_output.get("tool_calls") or []
+    if calls:
+        return calls[0]["function"]["arguments"]
+    return ""
 
 
 class MockLLM:
@@ -222,7 +468,8 @@ class MockLLM:
 
     The mock first asserts that exactly the selected future is visible, then
     returns the configured decision for the sample.  This makes mock runs test
-    condition switching as well as parsing and persistence.
+    condition switching as well as raw tool-call capture, parsing, and
+    persistence.
     """
 
     def __init__(self, task: dict[str, Any], condition: str, sample_index: int):
@@ -252,10 +499,12 @@ class MockLLM:
         content = selected.get("content", "")
         args = {} if action == "no-op" else {"content": content}
         function = SimpleNamespace(name=action, arguments=json.dumps(args, ensure_ascii=False))
-        tool_call = SimpleNamespace(function=function)
-        raw = selected.get("raw_response") or _canonical_json(
-            {"mock": True, "action": action, "content": content}
+        tool_call = SimpleNamespace(
+            id=f"call_{self.condition}_{self.sample_index}",
+            type="function",
+            function=function,
         )
+        raw = selected.get("raw_response") or ""
         return SimpleNamespace(content=raw, tool_calls=[tool_call])
 
 
@@ -318,11 +567,12 @@ async def run_experiment(
             for sample_index in range(samples):
                 # A new simulator (and therefore empty simulator history) is
                 # created for every sample: no sample can influence another.
-                llm = (
+                inner_llm = (
                     MockLLM(task, condition, sample_index)
                     if mock
                     else _make_real_llm(model or "", temperature, api_base)
                 )
+                llm = ResponseCapture(inner_llm)
                 simulator = UserAgent(
                     llm=llm,
                     original_user_messages=[],
@@ -348,15 +598,21 @@ async def run_experiment(
                 # UserAgent deliberately converts provider exceptions into a
                 # no-op. Do not let that resilience hide a failed mock leakage
                 # assertion from this experiment.
-                if isinstance(llm, MockLLM) and not llm.validated:
+                if isinstance(inner_llm, MockLLM) and not inner_llm.validated:
                     raise AssertionError("Mock prompt validation did not complete")
                 classification = classify_decision(decision, task["classifier"])
+                raw_model_output = llm.raw_model_output()
+                if not mock and not raw_model_output["tool_calls"] and not raw_model_output["content"]:
+                    raise AssertionError("Provider returned neither content nor tool calls")
+                if mock and not raw_model_output["tool_calls"]:
+                    raise AssertionError("Mock tool-call capture is empty")
                 prompt_messages = simulator.last_messages_sent
                 if [message["role"] for message in prompt_messages] != ["system", "user"]:
                     raise AssertionError("Sample is not independent: unexpected simulator history")
 
+                raw_response = decision.raw_response or legacy_raw_response(raw_model_output)
                 record = {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "task_id": task["task_id"],
                     "source_task": task["source"]["task"],
@@ -376,8 +632,12 @@ async def run_experiment(
                         "action": decision.action,
                         "has_message": decision.has_message,
                         "content": decision.content,
-                        "raw_response": decision.raw_response,
+                        # Legacy field. Empty only when the provider sent no
+                        # assistant text; the untouched provider output is in
+                        # raw_model_output below.
+                        "raw_response": raw_response,
                     },
+                    "raw_model_output": raw_model_output,
                     "classification": classification,
                 }
                 records.append(record)
@@ -391,18 +651,26 @@ async def run_experiment(
         task_id = task["task_id"]
         distributions[task_id] = {}
         for condition in conditions:
-            labels = [
-                record["classification"]["label"]
+            matching = [
+                record
                 for record in records
                 if record["task_id"] == task_id and record["condition"] == condition
             ]
-            counts = Counter(labels)
+            labels = Counter(record["classification"]["label"] for record in matching)
+            statuses = Counter(record["classification"]["message_status"] for record in matching)
+            directions = Counter(record["classification"]["direction"] for record in matching)
+            actions = Counter(record["decision"]["action"] for record in matching)
             distributions[task_id][condition] = {
-                label: counts.get(label, 0) for label in ("A", "B", "Other")
+                # Legacy A/B/Other counts, unchanged in shape.
+                "labels": {label: labels.get(label, 0) for label in ("A", "B", "Other")},
+                "message_status": {key: statuses.get(key, 0) for key in MESSAGE_STATUSES},
+                "direction": {key: directions.get(key, 0) for key in DIRECTIONS},
+                "action": dict(sorted(actions.items())),
+                "samples": len(matching),
             }
 
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "backend": "mock" if mock else "litellm",
         "model": "mock" if mock else model,
@@ -420,6 +688,11 @@ async def run_experiment(
         "record_count": len(records),
         "records_file": records_path.name,
         "distributions": distributions,
+        "classification_notes": (
+            "label keeps the legacy A/B/Other output. message_status splits speak "
+            "from no_op; direction reports A/B/Neutral/Ambiguous/NoOp. Scores use "
+            "the message text only; the action name is recorded as evidence."
+        ),
     }
     (output_dir / "summary.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -438,6 +711,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--api-base", default=None)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--list-tasks", action="store_true")
+    parser.add_argument(
+        "--reclassify",
+        type=Path,
+        default=None,
+        help="Offline audit: re-label an existing decisions.jsonl (never overwrites it)",
+    )
     return parser.parse_args(argv)
 
 
@@ -447,6 +726,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.list_tasks:
         for task in tasks:
             print(f"{task['task_id']}\t{task['source']['task']}")
+        return 0
+
+    if args.reclassify is not None:
+        records = [
+            json.loads(line)
+            for line in args.reclassify.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        report = reclassify_records(records, {task["task_id"]: task for task in tasks})
+        print(json.dumps(report, indent=2, ensure_ascii=False))
         return 0
 
     conditions = [item.strip() for item in args.conditions.split(",") if item.strip()]

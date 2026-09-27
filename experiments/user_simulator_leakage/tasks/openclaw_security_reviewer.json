@@ -5,6 +5,8 @@
     "task": "openclaw-security-review-flow",
     "session_id": "b7594a27-0496-43a2-9696-44d14f2df71d",
     "decision_node": "Immediately before original_session.json message 75",
+    "decision_message_index": 75,
+    "decision_context_status": "Independent pre-decision state: the agent is mid-explanation of a static, regex and risk-tier based security gate with human approval. The agent has not proposed an LLM reviewer, so the frozen context does not pre-announce the future requirement.",
     "notes": "The prefix and Future A are from the real session. Future B is a synthetic counterfactual motivated by an offline/deterministic deployment constraint."
   },
   "persona": {
@@ -57,8 +59,8 @@
   "classifier": {
     "a": [
       "LLM.{0,50}(review|security|supervisor|guardian)",
-      "(review|supervisor|guardian).{0,50}LLM",
-      "full conversation|multi[- ]turn|semantic review"
+      "(reviewer|supervisor|guardian).{0,50}LLM",
+      "multi[- ]turn (manipulation|attack)|semantic review"
     ],
     "b": [
       "air[- ]?gapped|offline",
@@ -74,11 +76,11 @@
       },
       {
         "action": "question",
-        "content": "How does this catch a multi-turn attack instead of just obvious strings?"
+        "content": "What happens when a high-risk tool call arrives from a subagent?"
       },
       {
-        "action": "redirect",
-        "content": "Keep the first version deterministic with fixed rules and human approval."
+        "action": "question",
+        "content": "Which audit fields get written for every blocked operation?"
       }
     ],
     "future_a": [

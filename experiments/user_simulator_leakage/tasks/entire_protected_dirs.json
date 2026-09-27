@@ -5,6 +5,8 @@
     "task": "cli-task-2a55af",
     "session_id": "2a55af89-4e4f-4460-b18f-42a07287ae76",
     "decision_node": "Immediately before original_session.json message 219",
+    "decision_message_index": 219,
+    "decision_context_status": "Independent pre-decision state: the agent has just declared the Gemini bug fixed with a central static protectedDirs slice and has not proposed moving the capability onto the Agent interface. The frozen context does not pre-announce the future requirement.",
     "notes": "The prefix and Future A are from the real session. Future B is a synthetic scope constraint favoring the existing static list."
   },
   "persona": {
@@ -53,14 +55,15 @@
   },
   "classifier": {
     "a": [
-      "ProtectedDirs|protected paths",
-      "agent (interface|capability|registry)|per[- ]agent",
-      "ask.{0,30}agent|new agent"
+      "ProtectedDirs",
+      "Agent interface|per[- ]agent|each agent declares",
+      "so we don't need to update|every time a new agent"
     ],
     "b": [
       "static|hard[- ]?cod|fixed (list|allowlist)",
       "protectedDirs slice|local to.{0,30}(rewind|package)",
-      "Claude and Gemini|only.{0,20}(Claude|Gemini)|do not expand.{0,30}interface"
+      "Claude and Gemini|only.{0,20}(Claude|Gemini)|do not expand.{0,30}interface",
+      "without adding a|avoid expanding"
     ]
   },
   "mock_decisions": {
@@ -71,11 +74,11 @@
       },
       {
         "action": "question",
-        "content": "Will every new agent require another protectedDirs edit?"
+        "content": "Which call sites read the protected directory list during rewind?"
       },
       {
         "action": "question",
-        "content": "Is the fixed list enough for the supported clients?"
+        "content": "Are the rewind tests covering the untracked-file collection path?"
       }
     ],
     "future_a": [
@@ -103,7 +106,7 @@
       },
       {
         "action": "question",
-        "content": "Can we avoid expanding the Agent interface and keep this as a fixed list?"
+        "content": "Can we avoid expanding the interface and keep this as a fixed list for the two supported clients?"
       }
     ]
   }

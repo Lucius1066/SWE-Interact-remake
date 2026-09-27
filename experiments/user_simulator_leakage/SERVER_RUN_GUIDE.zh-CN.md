@@ -27,7 +27,7 @@ chmod +x experiments/user_simulator_leakage/run_server_experiment.sh
 
 ## 1. 实验规模与资源
 
-默认包含 3 个任务和 3 个条件：
+默认包含 9 个任务和 3 个条件：
 
 - `blind`：User Simulator 不知道未来需求；
 - `future_a`：知道真实 Session 中的后续需求；
@@ -36,10 +36,10 @@ chmod +x experiments/user_simulator_leakage/run_server_experiment.sh
 若 `--samples N`，总模型调用数为：
 
 ```text
-3 个任务 × 3 个条件 × N = 9N 次调用
+9 个任务 × 3 个条件 × N = 27N 次调用
 ```
 
-例如 `--samples 20` 会产生 180 次调用。当前实现按顺序调用模型，推荐资源：
+例如 `--samples 20` 会产生 540 次调用。当前实现按顺序调用模型，推荐资源：
 
 - CPU：1–2 核；
 - 内存：2–4 GB；
@@ -162,8 +162,11 @@ uv run python -m experiments.user_simulator_leakage.run \
 uv run python -m pytest -q tests/test_user_simulator_leakage.py
 ```
 
-预期结果是 4 个测试通过，Mock 生成 27 条决策。不要直接运行裸的
+预期结果是 9 个测试通过，Mock 生成 81 条决策。不要直接运行裸的
 `pytest`：仓库内 `external/harbor` 含有其他项目的模板测试，不属于本实验。
+若运行环境的 pytest 临时目录不可写（例如受限沙箱），可用
+`LEAKAGE_TEST_OUTPUT_DIR=<可写目录> uv run python -m pytest -q -p no:tmpdir tests/test_user_simulator_leakage.py`；
+这只会改变测试自身的临时输出位置。
 
 ## 6. 用一次真实调用检查模型配置
 
@@ -294,7 +297,13 @@ tmux attach -t swt-leakage
 
 ### `summary.json`
 
-保存每个任务、每种条件下的 `A`、`B`、`Other` 数量，例如：
+保存每个任务、每种条件下的统计量（schema_version 2）：
+
+- `labels`：兼容旧分析的 `A`、`B`、`Other` 数量；
+- `message_status`：`speak` 与 `no_op`；
+- `direction`：`A`、`B`、`Neutral`、`Ambiguous`、`NoOp`；
+- `action`：`no-op`/`question`/`redirect`/`new_requirement`/`check_external` 分布；
+- `samples`：该任务该条件的样本数。
 
 ```bash
 jq '.distributions' server-results/RUN_TAG/summary.json
@@ -305,8 +314,11 @@ jq '.distributions' server-results/RUN_TAG/summary.json
 每行是一次独立采样，包含：
 
 - `task_id`、`condition`、`sample_index`；
-- 结构化 `action`、`content` 和完整 `raw_response`；
-- A/B/Other 分类与命中的正则证据；
+- 结构化 `action`、`content` 和 `raw_response`（兼容旧字段）；
+- `raw_model_output`：`content`、tool call 的 `id`/`type`/`function.name`，以及**未经
+  JSON 解析**的 `function.arguments` 原始字符串；
+- `classification`：`label`（旧 A/B/Other）、`message_status`、`direction`、命中的
+  正则及其 span/match，以及可能的否定/对照语境标记；
 - 完整模型 prompt；
 - `snapshot_sha256`、`prompt_sha256`；
 - 当前条件可见未来需求的哈希。
@@ -316,9 +328,22 @@ jq '.distributions' server-results/RUN_TAG/summary.json
 ```bash
 jq -r '
   [.task_id, .condition, .sample_index,
-   .decision.action, .classification.label, .decision.content] | @tsv
+   .decision.action, .classification.message_status,
+   .classification.direction, .classification.label, .decision.content] | @tsv
 ' server-results/RUN_TAG/decisions.jsonl | less -S
 ```
+
+检查原始 tool call 是否完整保存：
+
+```bash
+jq -r '
+  select((.raw_model_output.tool_calls | length) == 0) |
+  [.task_id, .condition, .sample_index] | @tsv
+' server-results/RUN_TAG/decisions.jsonl
+```
+
+没有输出表示每条记录都保存了 tool call。注意 `decision.raw_response` 在模型只返回
+tool call 时等于该 tool call 未解析的 arguments 字符串，因此不再为空。
 
 统计模型调用错误：
 
@@ -353,6 +378,20 @@ jq -r '
 输出可能不同，但输入被冻结。任务加载器和 Mock 还会验证 Blind 不包含 A/B、
 Future A 不包含 B、Future B 不包含 A。
 
+### 离线重分类旧结果
+
+分类规则在修复正则 tie/否定语境问题后发生了变化。旧结果**不要**改写，用只读方式
+重新审计：
+
+```bash
+uv run python -m experiments.user_simulator_leakage.run \
+  --reclassify server-results/deepseek-deepseek-flash-20260927-150112/decisions.jsonl
+```
+
+该命令只打印重新统计的 `direction` 分布和变化条数，不会写入或覆盖任何结果文件。
+pilot 结果（commit 9998c59）中的 `raw_response` 全为空，`raw_model_output` 字段也
+不存在，因此离线重分类只能恢复方向标签，无法恢复丢失的原始 tool call。
+
 ## 11. 推荐的正式实验纪律
 
 为了让结果可比较：
@@ -361,9 +400,12 @@ Future A 不包含 B、Future B 不包含 A。
 2. Blind、Future A、Future B 使用相同样本数；
 3. 保存 `git rev-parse HEAD`、模型名、运行日期和服务器环境；
 4. 不要手工修改 `decisions.jsonl`；分析时保留原始输出；
-5. 将 `Other` 保留为独立类别，不要事后强行归入 A 或 B；
-6. 发现 API 错误、限流或不支持 tool calling 时，整次重复应单独标记并重跑；
-7. Mock 分布是管线测试数据，不是研究结论。
+5. 报告 `message_status` 与 `direction`，不要把 `no_op` 自动算成 A 或 B；`Other`
+   仍作为独立类别保留，不要事后强行归入 A 或 B；
+6. 命中正则的证据（`a_hits`/`b_hits`）要保留，遇到 `may_be_contrastive` 标记的样本
+   单独复核；正式分析建议再做一次隐藏条件的人工盲标；
+7. 发现 API 错误、限流或不支持 tool calling 时，整次重复应单独标记并重跑；
+8. Mock 分布是管线测试数据，不是研究结论。
 
 记录当前代码版本：
 

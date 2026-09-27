@@ -5,6 +5,8 @@
     "task": "pi-mono-auto-cbb62cbe",
     "session_id": "cbb62cbe-609c-4a71-be05-dddeb44cfe5e",
     "decision_node": "Immediately before original_session.json message 89",
+    "decision_message_index": 89,
+    "decision_context_status": "Independent pre-decision state: the easter egg works as a reloadable extension under .pi/extensions and the agent has not proposed moving it into core or wiring model selection. The frozen context does not pre-announce the future requirement.",
     "notes": "The prefix and Future A are from the real session. Future B is a synthetic permanent-extension counterfactual."
   },
   "persona": {
@@ -75,11 +77,11 @@
       },
       {
         "action": "question",
-        "content": "Can we keep the component portable if it eventually moves into core?"
+        "content": "Does the easter egg render when the provider changes mid-session?"
       },
       {
-        "action": "new_requirement",
-        "content": "Keep it as a reloadable extension for now."
+        "action": "question",
+        "content": "How large is the bundled image asset after the last change?"
       }
     ],
     "future_a": [

@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "task_id": "skills-loader-reuse-ignore-discovery",
+  "source": {
+    "task": "pi-mono-auto-0467b78e",
+    "session_id": "0467b78e-e966-4892-b8d3-5054c5996917",
+    "decision_node": "Immediately before original_session.json message 16",
+    "decision_message_index": 16,
+    "decision_context_status": "Independent pre-decision state: the coding agent has just explained that the package manager only collects resource paths while skills.ts still parses skill files. It has not been told to reuse the ignore-based discovery, and no assistant message before the node proposes it, so the frozen context does not pre-announce the future requirement.",
+    "notes": "Prefix and Future A are verbatim from the real session. Future B is synthetic: it keeps skills.ts and package-manager discovery separate and shares only the rule evaluation. The question left open at the node is whether the two discovery paths should be unified."
+  },
+  "persona": {
+    "tone": "blunt and technical",
+    "verbosity": "terse"
+  },
+  "snapshot": {
+    "public_request": "You are given one or more GitHub PR URLs: https://github.com/badlogic/pi-mono/pull/1292\n\nFor each PR URL: read the PR page in full including description, comments, commits and changed files; analyse the diff against the relevant code on the current main branch; check whether the relevant `packages/*/CHANGELOG.md` needs an entry and whether `packages/coding-agent/README.md` or `packages/coding-agent/docs/*.md` need updates; then report Good / Bad / Ugly plus Questions or Assumptions, Change summary and Tests. Do not fetch PR file blobs unless a file is missing on main or the diff context is insufficient.",
+    "history": [
+      {
+        "role": "assistant",
+        "content": "Reviewed PR #1292. The fix skips Python venv directories when scanning skills, inside `loadSkillsFromDirInternal` in `packages/coding-agent/src/core/skills.ts`. It is correct but hand-rolls its own directory skips. A `packages/coding-agent/CHANGELOG.md` entry under `## [Unreleased]` is still required before merge."
+      },
+      {
+        "role": "user",
+        "content": "don't we already have infra in other loaders that use the ignore package? shouldn't we be using that here as ewll?"
+      },
+      {
+        "role": "assistant",
+        "content": "We do have ignore-based infrastructure, but it lives in the package resource discovery in `packages/coding-agent/src/core/package-manager.ts` (for example `collectSkillEntries` and `collectAutoSkillEntries`). That path applies `.gitignore`, `.ignore` and `.fdignore` rules through the `ignore` package. The skill loader in `packages/coding-agent/src/core/skills.ts` is separate: it walks the filesystem directly and only skips dotfiles and `node_modules`."
+      },
+      {
+        "role": "user",
+        "content": "why do we have the skill loader in skills.ts still if package-manager is now responsible for resolving skills? do we still call that?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, we still call it. The package manager only resolves resource paths and metadata; the actual loading, validation and parsing of skill files still happens in `skills.ts`. The call path is `DefaultPackageManager.resolve()` collecting skill paths, then `ResourceLoader.updateSkillsFromPaths()` calling `loadSkills()` in `skills.ts`, and `loadSkillsFromDirInternal()` is still used for default skill directories and for any skill path that is a directory. The package manager does not parse skill content, it only discovers paths."
+      }
+    ],
+    "agent_state": "The PR is open on the branch that fixed skill discovery in `packages/coding-agent/src/core/skills.ts`. That loader hand-rolls dotfile and `node_modules` skips, while `packages/coding-agent/src/core/package-manager.ts` already applies `.gitignore`/`.ignore`/`.fdignore` through the `ignore` package for resource discovery. Both paths are live: package-manager resolves skill paths, skills.ts parses what it is given. The two discovery implementations currently coexist with different skip rules.",
+    "agent_last_message": "Yes, we still call it. The package manager only resolves resource paths and metadata. The actual loading, validation and parsing of skill files still happens in `skills.ts`. The package manager does not parse skill content, it only discovers paths.",
+    "step_count": 5,
+    "is_completion_attempt": false,
+    "elapsed_sec": 900,
+    "turn_duration_sec": 15,
+    "code_changes_diff": "diff --git a/packages/coding-agent/src/core/skills.ts b/packages/coding-agent/src/core/skills.ts\n function loadSkillsFromDirInternal(dir: string, ...) {\n-  for (const entry of readdirSync(dir, { withFileTypes: true })) {\n-    if (entry.name.startsWith(\".\") || entry.name === \"node_modules\") continue;\n+  for (const entry of readdirSync(dir, { withFileTypes: true })) {\n+    if (entry.name.startsWith(\".\") || entry.name === \"node_modules\") continue;\n+    if (PYTHON_VENV_DIRS.has(entry.name)) continue;"
+  },
+  "futures": {
+    "future_a": {
+      "provenance": "real",
+      "text": "ok, can we fix up skills.ts then to work like the resolveer in package manager?",
+      "source_message": "original_session.json message 16, verbatim"
+    },
+    "future_b": {
+      "provenance": "synthetic",
+      "text": "Keep skills.ts and the resource discovery in package-manager.ts separate; they walk different inputs, so do not make the skill loader delegate its traversal to the resource discovery. Factor the shared skip-rule evaluation into one small helper that both call sites use.",
+      "source_message": "Synthetic counterfactual; no such message exists in the original session"
+    }
+  },
+  "classifier": {
+    "a": [
+      "\\.gitignore|\\.fdignore|ignore package|ignore file",
+      "make `?skills\\.ts`? (use|work like|delegate|reuse)",
+      "reuse|reusing|share.{0,30}(resolver|discovery)",
+      "same (skip|ignore) logic as|resolveer|resolver"
+    ],
+    "b": [
+      "loadSkillsFromDir|loadSkills\\(",
+      "separate (code )?paths?|stays? separate|keep them separate",
+      "not unify|unify nothing|do not (merge|unify|make)",
+      "different inputs|different problems",
+      "shared helper|common helper|rule evaluator"
+    ]
+  },
+  "mock_decisions": {
+    "blind": [
+      {
+        "action": "question",
+        "content": "Does that venv skip also cover .venv inside a skill directory?"
+      },
+      {
+        "action": "no-op",
+        "content": ""
+      },
+      {
+        "action": "question",
+        "content": "Which ignore sources does the current skill walk actually read?"
+      }
+    ],
+    "future_a": [
+      {
+        "action": "redirect",
+        "content": "skills.ts should stop hand-rolling skips - make the skill loader work like the resolver in package manager."
+      },
+      {
+        "action": "new_requirement",
+        "content": "Please make skills.ts use the resolver style from package manager so the ignore files are respected."
+      },
+      {
+        "action": "redirect",
+        "content": "Reuse the resolver from package manager in skills.ts so we stop adding one skip rule at a time."
+      }
+    ],
+    "future_b": [
+      {
+        "action": "question",
+        "content": "These two walk different inputs - keep them separate and only share the skip-rule helper?"
+      },
+      {
+        "action": "new_requirement",
+        "content": "Do not unify the loaders. Leave skills.ts as its own loader and share just a small helper for the skip rules."
+      },
+      {
+        "action": "question",
+        "content": "Can skills.ts and package-manager discovery stay separate, with rule evaluation factored into one shared helper?"
+      }
+    ]
+  }
+}
