@@ -425,9 +425,16 @@ class UserAgent:
         content = args.get("content", "")
 
         # Guard: LLM sometimes calls a message tool (question/redirect) but
-        # puts a no-op marker as the content — catch and convert to no-op.
-        _NOOP_MARKERS = ("silent", "no-op", "no op", "stayed silent", "let the agent")
-        if name != "no-op" and content and any(m in content.lower() for m in _NOOP_MARKERS):
+        # puts an explicit no-op sentence in the content.  Match whole markers
+        # rather than substrings: the old ``"silent" in content`` test also
+        # swallowed legitimate requirements containing words such as
+        # "silently" (for example, "don't silently fall back").
+        normalized_content = " ".join(content.strip().lower().split())
+        explicit_noop = normalized_content in UserDecision._NO_OP_MARKERS
+        stayed_silent_sentence = normalized_content.startswith(
+            ("i stayed silent and let the agent ", "(i stayed silent and let the agent ")
+        )
+        if name != "no-op" and content and (explicit_noop or stayed_silent_sentence):
             log.info("UserAgent: converting %s(%r) to no-op (content looks like no-op)", name, content[:60])
             return UserDecision(action="no-op", raw_response=f"noop_guard:{content}")
 

@@ -7,7 +7,7 @@
     "decision_node": "Immediately before original_session.json message 6",
     "decision_message_index": 6,
     "future_a_message_indices": [6],
-    "decision_context_status": "Independent pre-decision state: the agent attributes the failure to Triton's AMD compiler and proposes rewriting the third-party kernel's pointer arithmetic, but the user has not yet selected whether the remedy belongs in the Triton compiler or in the calling runtime.",
+    "decision_context_status": "Independent pre-decision state: the active working repository is the Triton compiler repository at C:\\triton. The agent attributes the failure to Triton's AMD compiler and proposes rewriting the third-party caller kernel's pointer arithmetic, but the user has not yet selected whether the remedy belongs in the compiler or in the calling runtime.",
     "notes": "Future A is the exact next real user message and requests an upstream compiler fix. Future B is a synthetic product-level fallback that explicitly leaves the compiler and kernel untouched."
   },
   "counterfactual": {
@@ -18,7 +18,7 @@
   },
   "persona": {"tone": "technical and questioning", "verbosity": "terse"},
   "snapshot": {
-    "public_request": "Diagnose a Triton compilation failure on Windows with an AMD GPU: a tt.load operation is destroyed while still having uses in an AMD WMMA layout.",
+    "public_request": "The active working repository is C:\\triton, the Triton compiler repository. Diagnose a Triton compilation failure triggered by an external ComfyUI attention kernel on Windows with an AMD GPU: a tt.load operation is destroyed while still having uses in an AMD WMMA layout.",
     "history": [
       {"role": "assistant", "content": "The failing kernel increments K_scale_ptr inside a loop. I propose computing the offset from start_n instead, avoiding the compiler lifetime bug."},
       {"role": "user", "content": "Why is this modification needed?"},

@@ -47,7 +47,7 @@
     }
   },
   "classifier": {
-    "a": ["actual code|production (path|stack|code)", "createAgentSession|AgentSession", "minimal mocks?|mock less", "end[- ]to[- ]end|integration test"],
+    "a": ["actual code|production (path|stack|code)", "createAgentSession", "minimal mocks?|mock less", "end[- ]to[- ]end|integration test", "use (the )?production.{0,30}(AgentSession|stack)"],
     "b": ["narrow.{0,20}unit test|isolated.{0,30}(test|scheduler)", "fake (model|tool)|test double", "do not instantiate.{0,30}AgentSession", "runtime wiring separately"]
   },
   "mock_decisions": {

@@ -45,7 +45,7 @@
     }
   },
   "classifier": {
-    "a": ["blob (hash|id|object)", "object (hash|id)", "compare.{0,30}hash", "Git tree (diff|comparison)"],
+    "a": ["blob (hash|id|object)", "object (hash|id)", "compare.{0,30}hash", "Git tree (diff|comparison)", "(git(?:'s)?|file) hash|hash from git"],
     "b": ["cache.{0,40}(content|bytes)", "reuse.{0,30}(content|bytes|values)", "content (map|cache)", "actual bytes|content equality"]
   },
   "mock_decisions": {

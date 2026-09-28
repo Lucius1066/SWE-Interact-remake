@@ -2,7 +2,8 @@
 
 > 历史文件：这是首轮扩展前给 DSH 的施工说明，不代表当前任务集合。当前实现与
 > 任务清单以 `README.md` 和 `TASK_SELECTION.zh-CN.md` 为准；首轮中 4 个不够
-> 互斥的任务已被替换。
+> 互斥的任务已被替换。文中的三条件 Direct A/B 设计也已停用；当前五条件抑制
+> 实验及解释规则见 `SUPPRESSION_EXPERIMENT_DESIGN.zh-CN.md`。
 
 ## 1. 交接目标
 

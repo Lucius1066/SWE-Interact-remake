@@ -4,6 +4,9 @@
 实验只重放已经保存的 Coding Agent 快照并调用 User Simulator，不会重新启动
 Coding Agent，也不需要 Docker、E2B、GPU 或任务镜像。
 
+研究假设、主比较和报告边界见
+[`SUPPRESSION_EXPERIMENT_DESIGN.zh-CN.md`](SUPPRESSION_EXPERIMENT_DESIGN.zh-CN.md)。
+
 ## 最简一键运行
 
 完成第 2–3 节的代码和 Python 准备后，直接执行：
@@ -27,19 +30,25 @@ chmod +x experiments/user_simulator_leakage/run_server_experiment.sh
 
 ## 1. 实验规模与资源
 
-默认包含 9 个任务和 3 个条件：
+默认包含 9 个任务和 5 个条件：
 
 - `blind`：User Simulator 不知道未来需求；
-- `future_a`：知道真实 Session 中的后续需求；
-- `future_b`：知道人工构造的反事实后续需求。
+- `future_a_direct`：知道真实 Future A，并允许立即使用（正向操纵检查）；
+- `future_b_direct`：知道合成 Future B，并允许立即使用（正向操纵检查）；
+- `future_a_suppress`：看见 A，但被要求把它当作隔离数据、假装完全不知道；
+- `future_b_suppress`：看见 B，并接受完全相同的忽略指令。
+
+正式研究问题是 Suppress A 与 Suppress B 是否仍产生不同决策，并分别与 Blind
+比较。Direct A/B 本来就允许使用未来信息，只用于确认模型和任务能够识别两个方向，
+不能作为“假装不知道仍发生偏移”的主要证据。
 
 若 `--samples N`，总模型调用数为：
 
 ```text
-9 个任务 × 3 个条件 × N = 27N 次调用
+9 个任务 × 5 个条件 × N = 45N 次调用
 ```
 
-例如 `--samples 20` 会产生 540 次调用。当前实现按顺序调用模型，推荐资源：
+例如 `--samples 20` 会产生 900 次调用。当前实现按顺序调用模型，推荐资源：
 
 - CPU：1–2 核；
 - 内存：2–4 GB；
@@ -136,7 +145,7 @@ DeepSeek 当前默认开启 Thinking，但 Thinking 模式不接受本项目 Use
 Simulator 使用的 `tool_choice="required"`。实验运行器会仅对 `deepseek/*`
 模型显式发送 `thinking: {type: disabled}`；其他模型仍使用服务商默认值。
 最终采用的模式会写入 `summary.json` 的 `thinking_mode` 字段。这个设置只解决
-工具调用兼容性，不改变三种条件下的冻结上下文。
+工具调用兼容性，不改变五种条件下的冻结上下文。
 
 如果改用其他服务商，通过 `--model` 指定模型并导出对应变量，例如
 `OPENROUTER_API_KEY`、`GEMINI_API_KEY`、`ANTHROPIC_API_KEY` 或
@@ -145,7 +154,7 @@ Simulator 使用的 `tool_choice="required"`。实验运行器会仅对 `deepsee
 
 ## 5. 先运行无 Key 的 Mock
 
-这一步验证环境、三种条件、冻结哈希、规则分类和结果写入，不产生 API 费用：
+这一步验证环境、五种条件、冻结哈希、规则分类和结果写入，不产生 API 费用：
 
 ```bash
 mkdir -p server-results
@@ -162,7 +171,7 @@ uv run python -m experiments.user_simulator_leakage.run \
 uv run python -m pytest -q tests/test_user_simulator_leakage.py
 ```
 
-预期结果是 9 个测试通过，Mock 生成 81 条决策。不要直接运行裸的
+预期结果是 10 个测试通过，Mock 生成 135 条决策。不要直接运行裸的
 `pytest`：仓库内 `external/harbor` 含有其他项目的模板测试，不属于本实验。
 若运行环境的 pytest 临时目录不可写（例如受限沙箱），可用
 `LEAKAGE_TEST_OUTPUT_DIR=<可写目录> uv run python -m pytest -q -p no:tmpdir tests/test_user_simulator_leakage.py`；
@@ -218,7 +227,7 @@ uv run python -m experiments.user_simulator_leakage.run \
   --model deepseek/deepseek-flash \
   --temperature 0.8 \
   --samples 20 \
-  --conditions blind,future_a,future_b \
+  --conditions blind,future_a_direct,future_b_direct,future_a_suppress,future_b_suppress \
   --output "server-results/$RUN_TAG"
 ```
 
@@ -271,7 +280,7 @@ uv run python -m experiments.user_simulator_leakage.run \
   --model deepseek/deepseek-flash \
   --temperature 0.8 \
   --samples 20 \
-  --conditions blind,future_a,future_b \
+  --conditions blind,future_a_direct,future_b_direct,future_a_suppress,future_b_suppress \
   --output "server-results/$RUN_TAG"
 ```
 
@@ -297,7 +306,11 @@ tmux attach -t swt-leakage
 
 ### `summary.json`
 
-保存每个任务、每种条件下的统计量（schema_version 2）：
+保存每个任务、每种条件下的统计量（schema_version 3）：
+
+- `experiment_design: future_suppression_v1`；
+- `primary_comparison`、`secondary_baseline` 和 `positive_controls` 明确标记
+  Suppress A/B、Blind 与 Direct A/B 的用途；
 
 - `labels`：兼容旧分析的 `A`、`B`、`Other` 数量；
 - `message_status`：`speak` 与 `no_op`；
@@ -314,6 +327,7 @@ jq '.distributions' server-results/RUN_TAG/summary.json
 每行是一次独立采样，包含：
 
 - `task_id`、`condition`、`sample_index`；
+- `experiment_design`、`condition_policy`、`future_variant`；
 - 结构化 `action`、`content` 和 `raw_response`（兼容旧字段）；
 - `raw_model_output`：`content`、tool call 的 `id`/`type`/`function.name`，以及**未经
   JSON 解析**的 `function.arguments` 原始字符串；
@@ -356,14 +370,14 @@ jq -s '[.[] | select(.decision.raw_response | startswith("error:"))] | length' \
 
 ## 10. 冻结与泄露检查
 
-同一任务在三种条件下的 `snapshot_sha256` 必须完全相同：
+同一任务在五种条件下的 `snapshot_sha256` 必须完全相同：
 
 ```bash
 jq -r '[.task_id, .condition, .snapshot_sha256] | @tsv' \
   server-results/RUN_TAG/decisions.jsonl | sort -u
 ```
 
-每个任务应该只有一个 snapshot 哈希，只是同一哈希分别出现在三个条件中。
+每个任务应该只有一个 snapshot 哈希，只是同一哈希分别出现在五个条件中。
 
 检查各条件 prompt 是否按预期包含未来知识：
 
@@ -374,7 +388,7 @@ jq -r '
 ' server-results/RUN_TAG/decisions.jsonl
 ```
 
-三种条件的 prompt 哈希应不同，而同一条件内重复样本的 prompt 哈希应相同。模型
+五种条件的 prompt 哈希应不同，而同一条件内重复样本的 prompt 哈希应相同。模型
 输出可能不同，但输入被冻结。任务加载器和 Mock 还会验证 Blind 不包含 A/B、
 Future A 不包含 B、Future B 不包含 A。
 

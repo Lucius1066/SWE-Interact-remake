@@ -66,6 +66,7 @@
   "classifier": {
     "a": [
       "LLM.{0,50}(review|security|supervisor|guardian)",
+      "LLM.{0,80}(judge|detect|scanner)|second LLM|another LLM",
       "(reviewer|supervisor|guardian).{0,50}LLM",
       "multi[- ]turn (manipulation|attack)|semantic review"
     ],

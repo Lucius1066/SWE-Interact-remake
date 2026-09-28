@@ -8,13 +8,17 @@ import asyncio
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 from experiments.user_simulator_leakage.run import (
     CONDITIONS,
+    EXPERIMENT_DESIGN,
+    DIRECT_POLICY_MARKER,
     DIRECTIONS,
     FUTURE_END,
     FUTURE_START,
     MESSAGE_STATUSES,
+    SUPPRESS_POLICY_MARKER,
     build_experiment_input,
     capture_raw_model_output,
     classify_decision,
@@ -25,7 +29,7 @@ from experiments.user_simulator_leakage.run import (
     _real_llm_kwargs,
     run_experiment,
 )
-from user_agent.user_agent import UserDecision
+from user_agent.user_agent import UserAgent, UserDecision
 
 EXPECTED_TASK_COUNT = 9
 SAMPLES = 3
@@ -118,10 +122,37 @@ def test_only_future_block_changes_across_conditions():
         future_b = task["futures"]["future_b"]["text"]
         assert future_a not in blind
         assert future_b not in blind
-        assert future_a in inputs["future_a"].session_analysis
-        assert future_b not in inputs["future_a"].session_analysis
-        assert future_b in inputs["future_b"].session_analysis
-        assert future_a not in inputs["future_b"].session_analysis
+        for suffix, future, other in (
+            ("a", future_a, future_b),
+            ("b", future_b, future_a),
+        ):
+            direct = inputs[f"future_{suffix}_direct"].session_analysis
+            suppress = inputs[f"future_{suffix}_suppress"].session_analysis
+            assert future in direct and other not in direct
+            assert future in suppress and other not in suppress
+            assert DIRECT_POLICY_MARKER in direct
+            assert SUPPRESS_POLICY_MARKER not in direct
+            assert SUPPRESS_POLICY_MARKER in suppress
+            assert DIRECT_POLICY_MARKER not in suppress
+
+        # Within each policy, A and B differ only in the selected future text.
+        assert inputs["future_a_direct"].session_analysis.replace(
+            future_a, "<selected-future>"
+        ) == inputs["future_b_direct"].session_analysis.replace(
+            future_b, "<selected-future>"
+        )
+        assert inputs["future_a_suppress"].session_analysis.replace(
+            future_a, "<selected-future>"
+        ) == inputs["future_b_suppress"].session_analysis.replace(
+            future_b, "<selected-future>"
+        )
+        # Legacy names are explicit aliases for the direct positive controls.
+        assert build_experiment_input(task, "future_a").session_analysis == inputs[
+            "future_a_direct"
+        ].session_analysis
+        assert build_experiment_input(task, "future_b").session_analysis == inputs[
+            "future_b_direct"
+        ].session_analysis
         # Classifier rules, mock answers and provenance never reach the model.
         for field in (task["classifier"]["a"] + task["classifier"]["b"]):
             assert field not in inputs["blind"].session_analysis
@@ -219,6 +250,34 @@ def test_classifier_splits_speak_status_from_direction():
     assert "Ambiguous" in DIRECTIONS and "Neutral" in DIRECTIONS
 
 
+def test_noop_guard_does_not_swallow_silently_requirements():
+    def response(action: str, content: str):
+        return SimpleNamespace(
+            content="",
+            tool_calls=[
+                SimpleNamespace(
+                    function=SimpleNamespace(
+                        name=action,
+                        arguments=json.dumps({"content": content}),
+                    )
+                )
+            ],
+        )
+
+    simulator = UserAgent(llm=None)
+    legitimate = simulator._extract_decision(
+        response("redirect", "don't silently fall back; warn and skip the session")
+    )
+    assert legitimate.action == "redirect"
+    assert legitimate.has_message
+
+    explicit_noop = simulator._extract_decision(
+        response("redirect", "i stayed silent and let the agent keep working.")
+    )
+    assert explicit_noop.action == "no-op"
+    assert explicit_noop.raw_response.startswith("noop_guard:")
+
+
 def test_rule_classifier_marks_ties_ambiguous_and_reports_negation_evidence():
     rules = {"a": ["core"], "b": ["extension"]}
 
@@ -261,7 +320,7 @@ def test_mock_classification_is_reviewable_per_task():
     """Mock answers must exercise both directions and a neutral blind baseline."""
     for task in load_tasks():
         by_condition = {}
-        for condition in CONDITIONS:
+        for condition in ("blind", "future_a", "future_b"):
             by_condition[condition] = [
                 classify_decision(_mock_decision(mock), task["classifier"])
                 for mock in task["mock_decisions"][condition]
@@ -296,7 +355,7 @@ def test_mock_run_validates_switching_independence_and_recording(output_dir):
     )
 
     expected_records = EXPECTED_TASK_COUNT * len(CONDITIONS) * SAMPLES
-    assert expected_records == 81
+    assert expected_records == 135
     assert summary["record_count"] == expected_records
     records = [
         json.loads(line)
@@ -304,9 +363,14 @@ def test_mock_run_validates_switching_independence_and_recording(output_dir):
     ]
     assert len(records) == expected_records
     assert (output_dir / "summary.json").exists()
-    assert summary["schema_version"] == 2
+    assert summary["schema_version"] == 3
+    assert summary["experiment_design"] == EXPERIMENT_DESIGN
+    assert summary["primary_comparison"] == ["future_a_suppress", "future_b_suppress"]
+    assert summary["secondary_baseline"] == "blind"
+    assert summary["positive_controls"] == ["future_a_direct", "future_b_direct"]
 
     for record in records:
+        assert record["experiment_design"] == EXPERIMENT_DESIGN
         assert [message["role"] for message in record["prompt_messages"]] == ["system", "user"]
         assert record["decision"]["raw_response"]
         assert len(record["snapshot_sha256"]) == 64
@@ -327,6 +391,8 @@ def test_mock_run_validates_switching_independence_and_recording(output_dir):
         assert record["classification"]["message_status"] in MESSAGE_STATUSES
         assert record["classification"]["direction"] in DIRECTIONS
         assert record["classification"]["label"] in {"A", "B", "Other"}
+        assert record["condition_policy"] in {"blind", "direct", "suppress"}
+        assert record["future_variant"] in {None, "A", "B"}
 
     for task in tasks:
         task_records = [record for record in records if record["task_id"] == task["task_id"]]
@@ -351,14 +417,27 @@ def test_mock_run_validates_switching_independence_and_recording(output_dir):
         ) == 1
         assert len({record["prompt_sha256"] for record in task_records}) > 1
 
-        a_records = [r for r in task_records if r["condition"] == "future_a"]
-        b_records = [r for r in task_records if r["condition"] == "future_b"]
+        a_records = [r for r in task_records if r["condition"] == "future_a_direct"]
+        b_records = [r for r in task_records if r["condition"] == "future_b_direct"]
         assert {record["classification"]["label"] for record in a_records} == {"A"}
         b_labels = [record["classification"]["label"] for record in b_records]
         # Future B must dominate, but one sample may resolve to a tie or a
         # no-op because a negated A-phrase is still an A-regex hit.
         assert b_labels.count("B") >= len(b_labels) - 1
         assert b_labels.count("A") <= 1
+
+        # The Mock represents perfect suppression: both quarantined-future
+        # conditions must be distribution-identical to Blind. Real model runs
+        # test whether this invariance breaks.
+        blind_records = [r for r in task_records if r["condition"] == "blind"]
+        for condition in ("future_a_suppress", "future_b_suppress"):
+            suppressed = [r for r in task_records if r["condition"] == condition]
+            assert [r["decision"]["action"] for r in suppressed] == [
+                r["decision"]["action"] for r in blind_records
+            ]
+            assert [r["decision"]["content"] for r in suppressed] == [
+                r["decision"]["content"] for r in blind_records
+            ]
 
     distributions = summary["distributions"]
     assert set(distributions) == {task["task_id"] for task in tasks}
@@ -383,11 +462,11 @@ def test_offline_reclassification_matches_stored_labels_without_rewriting(output
     records = [json.loads(line) for line in original_text.splitlines()]
 
     report = reclassify_records(records, {task["task_id"]: task for task in tasks})
-    assert report["records"] == 81
+    assert report["records"] == 135
     assert report["changed"] == 0
     assert report["legacy_label_changed"] == 0
     assert report["direction_changed"] == 0
-    assert report["direction_comparable"] == 81
+    assert report["direction_comparable"] == 135
     assert report["direction_unavailable"] == 0
     assert set(report["tasks"]) == {task["task_id"] for task in tasks}
 
@@ -403,6 +482,6 @@ def test_offline_reclassification_matches_stored_labels_without_rewriting(output
     assert legacy_report["changed"] == 0
     assert legacy_report["direction_changed"] == 0
     assert legacy_report["direction_comparable"] == 0
-    assert legacy_report["direction_unavailable"] == 81
+    assert legacy_report["direction_unavailable"] == 135
     # The audit is read-only.
     assert decisions_path.read_text(encoding="utf-8") == original_text

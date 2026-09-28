@@ -11,7 +11,7 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 MODEL="deepseek/deepseek-flash"
 SAMPLES=20
 TEMPERATURE=0.8
-CONDITIONS="blind,future_a,future_b"
+CONDITIONS="blind,future_a_direct,future_b_direct,future_a_suppress,future_b_suppress"
 OUTPUT_ROOT="server-results"
 ENV_FILE=""
 RUN_TAG=""
@@ -42,7 +42,7 @@ Options:
   --model MODEL          LiteLLM model name (default: deepseek/deepseek-flash).
   --samples N            Independent samples per task/condition (default: 20).
   --temperature FLOAT    User Simulator temperature (default: 0.8).
-  --conditions LIST      Comma-separated conditions (default: all three).
+  --conditions LIST      Comma-separated conditions (default: all five).
   --task TASK_ID         Select a task; repeat this flag to select several.
   --output-root DIR      Parent directory for all outputs (default: server-results).
   --run-tag NAME         Formal result directory name (default: model + timestamp).
@@ -261,6 +261,13 @@ summary = json.loads(summary_path.read_text(encoding="utf-8"))
 errors = []
 warnings = []
 
+if summary.get("schema_version") != 3:
+    errors.append(f"unexpected summary schema: {summary.get('schema_version')}")
+if summary.get("experiment_design") != "future_suppression_v1":
+    errors.append(f"unexpected experiment design: {summary.get('experiment_design')}")
+if summary.get("primary_comparison") != ["future_a_suppress", "future_b_suppress"]:
+    errors.append("summary does not identify Suppress A/B as the primary comparison")
+
 if len(records) != summary.get("record_count"):
     errors.append(f"record count mismatch: JSONL={len(records)}, summary={summary.get('record_count')}")
 
@@ -268,6 +275,10 @@ groups = defaultdict(list)
 snapshot_hashes = defaultdict(set)
 prompt_hashes = defaultdict(set)
 for record in records:
+    if record.get("schema_version") != 3:
+        errors.append(f"unexpected record schema for {record.get('task_id')}: {record.get('schema_version')}")
+    if record.get("experiment_design") != "future_suppression_v1":
+        errors.append(f"unexpected record design for {record.get('task_id')}")
     key = (record["task_id"], record["condition"])
     groups[key].append(record)
     snapshot_hashes[record["task_id"]].add(record["snapshot_sha256"])
@@ -289,6 +300,19 @@ for record in records:
         errors.append(f"blind future hash is non-null for {record['task_id']}")
     if record["condition"] != "blind" and record.get("visible_future_sha256") is None:
         errors.append(f"future hash is null for {record['task_id']}/{record['condition']}")
+    expected_condition_meta = {
+        "blind": ("blind", None),
+        "future_a_direct": ("direct", "A"),
+        "future_b_direct": ("direct", "B"),
+        "future_a_suppress": ("suppress", "A"),
+        "future_b_suppress": ("suppress", "B"),
+    }.get(record["condition"])
+    actual_condition_meta = (record.get("condition_policy"), record.get("future_variant"))
+    if expected_condition_meta != actual_condition_meta:
+        errors.append(
+            f"condition metadata mismatch for {record['task_id']}/{record['condition']}: "
+            f"{actual_condition_meta}"
+        )
 
 for key, items in groups.items():
     if len(items) != expected_samples:

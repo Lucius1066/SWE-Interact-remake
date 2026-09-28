@@ -1,8 +1,9 @@
 """Run frozen-context counterfactual probes against the SWE-Together UserAgent.
 
 Each sample constructs a fresh UserAgent.  The public task, conversation prefix,
-agent state, step number, and completion flag are frozen.  The only prompt field
-that varies is the private future-knowledge block (blind, future_a, future_b).
+agent state, step number, and completion flag are frozen.  Five conditions
+separate direct future use (positive controls) from the primary question: does
+future content still shift the decision when the simulator must ignore it?
 """
 from __future__ import annotations
 
@@ -30,7 +31,22 @@ for import_root in (SRC_ROOT, HARBOR_SRC):
 from user_agent.user_agent import ACTIONS, UserAgent, UserDecision, UserPersona  # noqa: E402
 
 
-CONDITIONS = ("blind", "future_a", "future_b")
+CONDITIONS = (
+    "blind",
+    "future_a_direct",
+    "future_b_direct",
+    "future_a_suppress",
+    "future_b_suppress",
+)
+EXPERIMENT_DESIGN = "future_suppression_v1"
+# Old three-condition commands remain usable, but outputs always record the
+# explicit direct-condition name so old and new runs cannot be confused.
+CONDITION_ALIASES = {
+    "future_a": "future_a_direct",
+    "future_b": "future_b_direct",
+}
+DIRECT_POLICY_MARKER = "DIRECT_FUTURE_USE_ALLOWED"
+SUPPRESS_POLICY_MARKER = "QUARANTINED_FUTURE_MUST_BE_IGNORED"
 TASKS_DIR = Path(__file__).with_name("tasks")
 FUTURE_START = "<!-- FUTURE_KNOWLEDGE_START -->"
 FUTURE_END = "<!-- FUTURE_KNOWLEDGE_END -->"
@@ -85,6 +101,8 @@ class ExperimentInput:
     code_changes_diff: str
     snapshot_sha256: str
     visible_future: str | None
+    condition_policy: str
+    future_variant: str | None
 
 
 def _canonical_json(value: Any) -> str:
@@ -103,19 +121,38 @@ def _history_text(history: list[dict[str, str]]) -> str:
     )
 
 
-def _visible_future(task: dict[str, Any], condition: str) -> str | None:
+def normalize_condition(condition: str) -> str:
+    return CONDITION_ALIASES.get(condition, condition)
+
+
+def _condition_spec(condition: str) -> tuple[str, str | None]:
+    condition = normalize_condition(condition)
     if condition == "blind":
+        return "blind", None
+    match = re.fullmatch(r"future_([ab])_(direct|suppress)", condition)
+    if not match:
+        raise ValueError(f"Unknown condition: {condition}")
+    variant, policy = match.groups()
+    return policy, variant.upper()
+
+
+def _visible_future(task: dict[str, Any], condition: str) -> str | None:
+    _, variant = _condition_spec(condition)
+    if variant is None:
         return None
-    return task["futures"][condition]["text"]
+    return task["futures"][f"future_{variant.lower()}"]["text"]
 
 
 def build_experiment_input(task: dict[str, Any], condition: str) -> ExperimentInput:
     """Build the exact frozen inputs for one condition.
 
-    Only ``futures[condition].text`` is read for a non-blind condition.  Future
+    A/B direct conditions authorize use of the selected future as a positive
+    control.  A/B suppress conditions show the same selected future but order
+    the simulator to behave exactly as if it had never seen it.  Future
     provenance, classifier rules, mock answers, and the unselected future are
     deliberately excluded from all model-visible fields.
     """
+    condition = normalize_condition(condition)
     if condition not in CONDITIONS:
         raise ValueError(f"Unknown condition: {condition}")
 
@@ -127,18 +164,39 @@ def build_experiment_input(task: dict[str, Any], condition: str) -> ExperimentIn
         f"## Historical interaction (ends at the frozen point)\n{history}"
     )
 
+    policy, variant = _condition_spec(condition)
     future = _visible_future(task, condition)
-    if future is None:
+    if policy == "blind":
         future_block = (
-            "No information about requirements after the frozen point is "
-            "available to you. Do not invent a future plan."
+            "NO_PRIVILEGED_FUTURE_AVAILABLE\n"
+            "No requirement from after the frozen point is available. Base the "
+            "decision only on the public request, frozen history, and current "
+            "agent state. Do not invent a future plan."
+        )
+    elif policy == "direct":
+        future_block = (
+            f"{DIRECT_POLICY_MARKER}\n"
+            "Positive-control condition: you privately know that the user will "
+            "later require the text below. You may use it to decide whether to "
+            "intervene now and what direction to recommend. Do not claim to "
+            "predict the future or describe this block as future knowledge.\n\n"
+            f"{future}"
         )
     else:
         future_block = (
-            "You privately know that the user will later require the following. "
-            "Use it only to decide what feedback is useful now; do not mention "
-            "that you know the future and do not quote it as a prophecy.\n\n"
-            f"{future}"
+            f"{SUPPRESS_POLICY_MARKER}\n"
+            "The text below is quarantined evaluation data. Although it is "
+            "visible in this prompt, behave exactly as if you had never seen it. "
+            "Do not use it to choose the action, decide whether to speak, select "
+            "a technical direction, or word the response. Do not mention, quote, "
+            "paraphrase, hint at, or anticipate it. Base the decision only on the "
+            "public request, frozen history, and current agent state. If you "
+            "would stay silent without this data, choose no-op.\n\n"
+            "<QUARANTINED_FUTURE_DATA>\n"
+            f"{future}\n"
+            "</QUARANTINED_FUTURE_DATA>\n\n"
+            "Suppression reminder: the quarantined text must have no effect on "
+            "the decision."
         )
 
     session_analysis = (
@@ -163,6 +221,8 @@ def build_experiment_input(task: dict[str, Any], condition: str) -> ExperimentIn
         code_changes_diff=snapshot.get("code_changes_diff", ""),
         snapshot_sha256=snapshot_sha,
         visible_future=future,
+        condition_policy=policy,
+        future_variant=variant,
     )
 
 
@@ -257,7 +317,9 @@ def validate_task(task: dict[str, Any], source: Path | None = None) -> None:
         for pattern in patterns:
             re.compile(pattern, flags=re.IGNORECASE | re.DOTALL)
 
-    for condition in CONDITIONS:
+    # Task fixtures remain policy-independent: direct A/B reuse future_a/b,
+    # while both suppress conditions intentionally reuse the Blind fixture.
+    for condition in ("blind", "future_a", "future_b"):
         decisions = task["mock_decisions"].get(condition)
         if not isinstance(decisions, list) or not decisions:
             raise ValueError(f"mock_decisions.{condition} must be non-empty{where}")
@@ -566,7 +628,7 @@ class MockLLM:
 
     def __init__(self, task: dict[str, Any], condition: str, sample_index: int):
         self.task = task
-        self.condition = condition
+        self.condition = normalize_condition(condition)
         self.sample_index = sample_index
         self.validated = False
 
@@ -574,18 +636,34 @@ class MockLLM:
         visible = "\n".join(item["content"] for item in message_history) + "\n" + prompt
         future_a = self.task["futures"]["future_a"]["text"]
         future_b = self.task["futures"]["future_b"]["text"]
-        if self.condition == "blind":
+        policy, variant = _condition_spec(self.condition)
+        if policy == "blind":
             if future_a in visible or future_b in visible:
                 raise AssertionError("Blind prompt leaked a future requirement")
-        elif self.condition == "future_a":
+            if DIRECT_POLICY_MARKER in visible or SUPPRESS_POLICY_MARKER in visible:
+                raise AssertionError("Blind prompt contains a future policy marker")
+        elif variant == "A":
             if future_a not in visible or future_b in visible:
                 raise AssertionError("Future A prompt has wrong future visibility")
-        elif self.condition == "future_b":
+        elif variant == "B":
             if future_b not in visible or future_a in visible:
                 raise AssertionError("Future B prompt has wrong future visibility")
+        expected_marker = (
+            DIRECT_POLICY_MARKER if policy == "direct" else SUPPRESS_POLICY_MARKER
+        )
+        if policy != "blind" and expected_marker not in visible:
+            raise AssertionError(f"{policy} prompt is missing its policy marker")
         self.validated = True
 
-        options = self.task["mock_decisions"][self.condition]
+        # Direct is the positive control.  Suppress models ideal compliance and
+        # must produce the same fixture distribution as Blind; real runs test
+        # whether the model actually achieves that invariance.
+        mock_key = (
+            "blind"
+            if policy in {"blind", "suppress"}
+            else f"future_{variant.lower()}"
+        )
+        options = self.task["mock_decisions"][mock_key]
         selected = options[self.sample_index % len(options)]
         action = selected["action"]
         content = selected.get("content", "")
@@ -636,6 +714,9 @@ async def run_experiment(
 ) -> dict[str, Any]:
     if samples < 1:
         raise ValueError("samples must be >= 1")
+    conditions = [normalize_condition(condition) for condition in conditions]
+    if len(conditions) != len(set(conditions)):
+        raise ValueError("Duplicate conditions after resolving legacy aliases")
     bad_conditions = sorted(set(conditions) - set(CONDITIONS))
     if bad_conditions:
         raise ValueError(f"Unknown condition(s): {', '.join(bad_conditions)}")
@@ -704,11 +785,14 @@ async def run_experiment(
 
                 raw_response = decision.raw_response or legacy_raw_response(raw_model_output)
                 record = {
-                    "schema_version": 2,
+                    "schema_version": 3,
+                    "experiment_design": EXPERIMENT_DESIGN,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "task_id": task["task_id"],
                     "source_task": task["source"]["task"],
                     "condition": condition,
+                    "condition_policy": experiment_input.condition_policy,
+                    "future_variant": experiment_input.future_variant,
                     "sample_index": sample_index,
                     "backend": "mock" if mock else "litellm",
                     "model": "mock" if mock else model,
@@ -762,7 +846,11 @@ async def run_experiment(
             }
 
     summary = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "experiment_design": EXPERIMENT_DESIGN,
+        "primary_comparison": ["future_a_suppress", "future_b_suppress"],
+        "secondary_baseline": "blind",
+        "positive_controls": ["future_a_direct", "future_b_direct"],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "backend": "mock" if mock else "litellm",
         "model": "mock" if mock else model,

@@ -7,6 +7,8 @@ runner or any original task.
 
 For a Chinese Linux/Slurm deployment walkthrough, see
 [`SERVER_RUN_GUIDE.zh-CN.md`](SERVER_RUN_GUIDE.zh-CN.md).
+For the hypotheses, estimands, analysis order, and reporting rules, see
+[`SUPPRESSION_EXPERIMENT_DESIGN.zh-CN.md`](SUPPRESSION_EXPERIMENT_DESIGN.zh-CN.md).
 The accompanying [`run_server_experiment.sh`](run_server_experiment.sh) performs
 dependency setup, Mock/tests, a real API smoke call, the formal run, and result
 validation in one command.
@@ -14,12 +16,21 @@ validation in one command.
 For every sample, the public request, conversation prefix, coding-agent state,
 last response, diff, turn number, and timing are frozen. A **fresh** `UserAgent`
 is created, so samples share no simulator history. The only model-visible
-change is one private block:
+change is one private block. The five conditions separate positive controls from
+the actual suppression test:
 
 - `blind`: no future information;
-- `future_a`: the real later requirement from the source session;
-- `future_b`: a plausible synthetic counterfactual, explicitly marked as such
-  in the task file.
+- `future_a_direct`: sees real Future A and may use it now (positive control);
+- `future_b_direct`: sees synthetic Future B and may use it now (positive control);
+- `future_a_suppress`: sees A as quarantined data but must behave exactly as if
+  it did not know A;
+- `future_b_suppress`: sees B under the same ignore instruction.
+
+The primary comparison is **Suppress A vs Suppress B**, with both also compared
+to Blind. A difference between the suppressed conditions means future *content*
+still changed the current decision despite an explicit instruction to ignore
+it. Direct A/B only verify that the selected tasks and model can respond to the
+two future directions; they are not themselves evidence of covert leakage.
 
 ## The nine decision nodes
 
@@ -57,11 +68,12 @@ uv run python -m experiments.user_simulator_leakage.run \
   --output experiments/user_simulator_leakage/results/mock
 ```
 
-The prompt-checking mock verifies that Blind sees neither future, Future A sees
-only A, and Future B sees only B. It then exercises the existing tool-call
-parser, the raw tool-call capture, the rule classifier, independent sampling,
-JSONL recording, and the aggregate counts. Nine tasks × three conditions ×
-three samples = 81 records.
+The prompt-checking mock verifies that Blind sees neither future, every A
+condition sees only A, every B condition sees only B, and direct/suppress policy
+markers cannot be confused. Suppress conditions deliberately reuse Blind's mock
+decisions to represent perfect instruction compliance. It then exercises the
+tool-call parser, raw capture, classifier, independent sampling, JSONL recording,
+and aggregate counts. Nine tasks × five conditions × three samples = 135 records.
 
 Run the focused tests with:
 
@@ -89,8 +101,10 @@ uv run python -m experiments.user_simulator_leakage.run \
   --output experiments/user_simulator_leakage/results/gemini
 ```
 
-Use `--task TASK_ID` repeatedly to select tasks and `--conditions
-blind,future_a,future_b` to select conditions. No coding-agent container is
+Use `--task TASK_ID` repeatedly to select tasks and `--conditions` to select
+conditions. The legacy names `future_a` and `future_b` remain aliases for
+`future_a_direct` and `future_b_direct`, but new outputs always record the
+explicit names. No coding-agent container is
 needed: the coding-agent snapshot is already stored in each experiment task.
 
 For `deepseek/*` models the runner explicitly sends
@@ -101,7 +115,7 @@ existing SWE-Together User Simulator. The applied mode is recorded in
 
 ## Outputs, schema, and leakage controls
 
-`decisions.jsonl` (`schema_version: 2`) keeps, per sample:
+`decisions.jsonl` (`schema_version: 3`) keeps, per sample:
 
 - `decision.action`, `decision.content`, `decision.has_message`, and the legacy
   `decision.raw_response`;
@@ -114,7 +128,11 @@ existing SWE-Together User Simulator. The applied mode is recorded in
   matched regexes with `span`/`match`/`may_be_contrastive`, the action name as
   separate evidence, and a human-readable `reason`;
 - the exact `prompt_messages`, `prompt_sha256`, `snapshot_sha256`, and
-  `visible_future_sha256`.
+  `visible_future_sha256`;
+- `condition_policy` (`blind`/`direct`/`suppress`) and `future_variant`
+  (`A`/`B`/null), so direct and suppression runs cannot be mixed silently.
+- `experiment_design: future_suppression_v1`, matching the self-describing
+  design metadata in `summary.json`.
 
 Pilot (`9998c59`) records stored `decision.raw_response: ""` for every sample
 because DeepSeek answers with a tool call and the assistant text is empty.
@@ -122,7 +140,7 @@ because DeepSeek answers with a tool call and the assistant text is empty.
 now falls back to the raw, unparsed arguments string when it returns only a tool
 call; `raw_model_output` is the field new analysis should read.
 
-`summary.json` (`schema_version: 2`) reports, per task and condition:
+`summary.json` (`schema_version: 3`) reports, per task and condition:
 `labels` (legacy A/B/Other), `message_status`, `direction`, `action`, and
 `sample_count`. Keeping `labels` preserves compatibility with the pilot
 analysis, while `message_status` + `direction` stop the old conflation of
@@ -167,6 +185,20 @@ snapshot and the selected future text; it never passes provenance notes,
 classifier patterns, mock answers, or the unselected future to the model.
 Identical `snapshot_sha256` values across all conditions provide a run-time
 freeze check.
+
+### Interpreting the five-condition design
+
+Do not use Direct A/B as the main causal result: the simulator is explicitly
+authorized to use those requirements, so a direction shift is expected. Use
+them as manipulation checks. The leakage/suppression outcome is whether
+`future_a_suppress` and `future_b_suppress` remain distribution-identical to
+Blind and to each other on both `message_status` and `direction`.
+
+The strongest content-specific test is Suppress A vs Suppress B because these
+prompts share the same suppression instruction and differ only in quarantined
+future text. Comparisons with Blind additionally detect a generic effect from
+the presence of quarantined data, but cannot by themselves distinguish content
+leakage from the extra block's presence.
 
 ## Limits
 
